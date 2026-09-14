@@ -24,7 +24,26 @@ The intended `sempic_open` integration operates at the generation boundary, rath
 
 KV Packet and Joint are included in the integration scope. Reuse the soft-token representation; specify whether embeddings enter Writer compilation or Reader input. Reader-only soft tokens do not change Writer cache identity. Soft tokens used during compilation do affect that identity.
 
-The current ICLR implementation inserts Pre/Post embeddings into Reader input around each reusable occurrence. They occupy Reader positions and produce ordinary causal Reader states; they are not part of the persistent content representation. The native Writer compiler currently receives document token IDs and an optional LoRA adapter. Moving these functions does not implement Writer-side soft tokens. KV Packet and Joint therefore require an explicit extension to compilation input, retained KV rows, and position handling before they can be reported as supported.
+The current ICLR implementation inserts Pre/Post embeddings into Reader input around each reusable occurrence. They occupy Reader positions and produce ordinary causal Reader states; they are not part of the persistent content representation.
+
+Writer compilation accepts deployment `writer_soft_tokens` with optional `pre` and `post` entries, using the same `{ "data": "<base64 torch.save tensor>" }` representation as Reader prompt embeddings. ReLoCache loads these tensors once in the model's dtype and enables native prompt embeddings. Tensor row counts determine the lengths; a separate `count` is unnecessary. Omit `writer_adapter` for a base Writer (KV Packet), or supply a standard PEFT adapter for Joint. The service does not select methods by name.
+
+Explicit and automatic compilation both execute `[Pre, document, Post, page padding, observation]` through native mixed token/embedding input. All Pre/document/Post KV rows are retained, with contiguous local positions starting at zero; padding and the observation row are excluded from Reader attention. Each reusable occurrence occupies `pre_length + document_length + post_length` Reader positions, so subsequent Inline and decode positions advance by that full extent. Reader-side soft tokens remain separate ordinary inputs and are not implicitly inserted from the Writer configuration. This implements the uncompressed packet path; KV selection and reduction are outside this extension.
+
+Native page identity includes Writer soft-token values, shapes, dtypes, and Pre/Post placement, in addition to method identity and document tokens. Reusable descriptors carry typed tensors through native vLLM IPC; only compilation requests build full mixed embeddings. Workers consuming cached contents still receive compact continuous layouts. Registration and metadata persistence retain source document tokens; restoring a source binds it to the current deployment's Writer and soft tokens.
+
+For example, add the following to the deployment JSON; either soft-token side may be omitted:
+
+```json
+{
+  "writer_soft_tokens": {
+    "pre": {"data": "<base64 torch.save tensor shaped [P, hidden_size]>"},
+    "post": {"data": "<base64 torch.save tensor shaped [S, hidden_size]>"}
+  }
+}
+```
+
+Content register/compile/get responses return the original document `input_ids` and the full wrapped `logical_length`. Content references and explicit compile calls use the existing API without additional request fields.
 
 ## ReLoCache to vLLM
 

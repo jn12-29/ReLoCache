@@ -11,6 +11,7 @@ from vllm.exceptions import VLLMValidationError
 from vllm.renderers.embed_utils import safe_load_prompt_embeds_async
 from vllm.renderers.hf import _build_mixed_prompt_embeds
 from vllm.v1.core.pic import ReusableInput
+from vllm.v1.engine.pic_compiler import content_token_ids
 
 
 def has_reusable_content(messages):
@@ -104,8 +105,9 @@ async def render_reusable_chat(
             )
         elif part["type"] == "reusable_content":
             content = contents[part["id"]]
-            spans.append((len(ids), len(content["input_ids"]), content_indices[part["id"]]))
-            ids.extend(content["input_ids"])
+            content_ids = content_token_ids(content)
+            spans.append((len(ids), len(content_ids), content_indices[part["id"]]))
+            ids.extend(content_ids)
         else:
             data = part["data"]
             if data not in decoded_embeds:

@@ -5,6 +5,7 @@ from functools import partial
 from fastapi import APIRouter, HTTPException, Request
 from vllm.entrypoints.openai.chat_completion.api_router import create_chat_completion
 from vllm.entrypoints.openai.responses.api_router import create_responses
+from vllm.v1.engine.pic_compiler import content_token_ids
 
 from .content import ContentStore
 from .protocol import (
@@ -21,7 +22,7 @@ def public_content(content):
     return {
         "content_id": content["content_id"],
         "input_ids": content["input_ids"],
-        "logical_length": len(content["input_ids"]),
+        "logical_length": len(content_token_ids(content)),
     }
 
 

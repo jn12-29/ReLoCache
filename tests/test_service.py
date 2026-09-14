@@ -1,11 +1,14 @@
 """Protect content identity and native compilation through HTTP."""
 
 import asyncio
+import base64
 import json
+from io import BytesIO
 from types import SimpleNamespace
 
 import httpx
 import pytest
+import torch
 from fastapi import FastAPI
 from pydantic import ValidationError
 from vllm.config import KVTransferConfig, LoRAConfig
@@ -131,7 +134,8 @@ def test_catalog_reopens_and_isolates_writer_identity(tmp_path, persist_metadata
 
 
 @pytest.mark.parametrize("storage", [None, "cpu", "fs"])
-def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage):
+@pytest.mark.parametrize("writer_soft", [False, True])
+def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage, writer_soft):
     async def check():
         engine = Engine()
         if storage is not None:
@@ -147,7 +151,19 @@ def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage):
                 },
             )
         writer = {"lora_name": "writer", "lora_int_id": 1, "lora_path": "/adapter"}
-        store = ContentStore(engine, {"method_id": "writer", "writer": writer})
+        config = {"method_id": "writer", "writer": writer}
+        if writer_soft:
+            engine.model_config = SimpleNamespace(
+                enable_prompt_embeds=True,
+                dtype=torch.float32,
+                get_hidden_size=lambda: 4,
+            )
+            buffer = BytesIO()
+            torch.save(torch.full((2, 4), 0.5), buffer)
+            config["writer_soft_tokens"] = {
+                "post": {"data": base64.b64encode(buffer.getvalue()).decode()},
+            }
+        store = ContentStore(engine, config)
         app = FastAPI()
         app.state.relocache = store
         app.include_router(router)
@@ -156,11 +172,15 @@ def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage):
             client.http = httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://service"
             )
-            await client.compile("doc", input_ids=[21, 22])
+            result = await client.compile("doc", input_ids=[21, 22])
+            assert result["logical_length"] == (4 if writer_soft else 2)
             prompt, sampling, kwargs = engine.requests[0]
             assert kwargs["lora_request"].lora_name == "writer"
             assert prompt["prompt_token_ids"] == [21, 22]
             assert sampling.extra_args["pic_compile"]["input_ids"] == [21, 22]
+            if writer_soft:
+                tensor = sampling.extra_args["pic_compile"]["writer_soft_tokens"]["post"]
+                torch.testing.assert_close(tensor, torch.full((2, 4), 0.5))
             if storage == "fs":
                 engine.pending = [True, False]
                 await client.compile("persisted", input_ids=[31, 32], persist=True)

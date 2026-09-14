@@ -19,6 +19,8 @@ def engine_options(config):
         disable_log_stats=False,
     )
     options.setdefault("api_server_count", 1)
+    if config.get("writer_soft_tokens"):
+        options["enable_prompt_embeds"] = True
     writer_path = config.get("writer_adapter")
     writer = None
     if writer_path:
@@ -45,6 +47,7 @@ def engine_options(config):
         "relocache": {
             "method_id": config["method_id"],
             "writer": writer,
+            "writer_soft_tokens": config.get("writer_soft_tokens", {}),
             "metadata_dir": (
                 str(Path(config["metadata_dir"]).resolve())
                 if config.get("metadata_dir") is not None

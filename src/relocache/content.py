@@ -7,6 +7,7 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from vllm.inputs import tokens_input
+from vllm.renderers.embed_utils import safe_load_prompt_embeds
 from vllm.v1.engine.pic_compiler import compile_inputs
 
 
@@ -15,6 +16,10 @@ class ContentStore:
         self.engine = engine
         self.config = config
         self.contents = {}
+        self.writer_soft_tokens = {
+            name: safe_load_prompt_embeds(engine.model_config, part["data"].encode())
+            for name, part in config.get("writer_soft_tokens", {}).items()
+        }
         directory = config.get("metadata_dir")
         self.metadata_dir = (
             Path(directory) / f"writer-{quote(config['method_id'], safe='')}"
@@ -53,6 +58,8 @@ class ContentStore:
             "method_id": self.config["method_id"],
             "writer": self.config.get("writer"),
         }
+        if self.writer_soft_tokens:
+            content["writer_soft_tokens"] = self.writer_soft_tokens
         self.contents[content_id] = content
         return content
 
