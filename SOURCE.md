@@ -6,7 +6,7 @@
 - Last source commit changing that subtree: `26799674f52032d36df61418c28ea1df5d0695df`.
 - Upstream vLLM base: `08b3e67b669d18d5bbd14e456b8bb4794916e402`.
 
-The fork starts at the real upstream commit, imported from the local upstream reference repository with a shallow history boundary. The next commit contains the exact tracked source tree extracted from `sempic_iclr`; a separate documentation commit describes this fork. Existing upstream license and attribution files are retained.
+The fork starts at the real upstream commit, imported from the local upstream reference repository with a shallow history boundary and tagged `upstream-base`. The next commit consolidates the current ReLoCache execution changes, including the Native PIC extraction and subsequent service separation. Use `git -C third_party/vllm diff upstream-base..main` to review the fork against upstream. Existing upstream license and attribution files are retained.
 
 The original repositories and environments are read-only. No environment, compiled extension, runtime cache, model weights, or experiment output was copied. No runtime validation was performed during initialization.
 

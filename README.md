@@ -41,14 +41,15 @@ curl http://127.0.0.1:8000/v1/models
 
 ## 仓库
 
-`third_party/vllm/` 是独立 Git 仓库，以 submodule 管理；父仓库不跟踪其中的源码文件。Native PIC 改动基于上游 `08b3e67b669d` 提交，父仓库固定对应的 fork 版本。修改时先提交 fork，再更新父仓库的 submodule 引用。
+`third_party/vllm/` 是独立 Git 仓库，以 submodule 管理；父仓库不跟踪其中的源码文件。Native PIC 改动基于真实上游 `08b3e67b669d` 提交，该提交作为 shallow 历史边界并标记为 `upstream-base`，其后集中保存当前 fork 改动。父仓库固定对应的 fork 版本。修改时先提交 fork，再更新父仓库的 submodule 引用。
 
-两个仓库的开发分支均为 `main`。当前未配置发布远程；submodule URL 指向本机的 fork。发布后，将 `.gitmodules` 中的 URL 更新为 fork 的远程地址并运行 `git submodule sync`。
+两个仓库的开发分支均为 `main`，`origin` 分别指向私有 GitHub 仓库 `jn12-29/ReLoCache` 和 `jn12-29/vllm-relocache`；submodule URL 指向后者。
 
 ```bash
 git status
 git submodule status
 git -C third_party/vllm status
+git -C third_party/vllm diff upstream-base..main
 ```
 
 初始化来源及环境约束见 [SOURCE.md](SOURCE.md)，接入边界见 [docs/integration.md](docs/integration.md)。
