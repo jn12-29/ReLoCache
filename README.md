@@ -1,6 +1,6 @@
 # ReLoCache
 
-基于 `sempic_iclr` Native PIC 实现的 vLLM 内容复用与推理服务。
+ReLoCache 定位为位置无关缓存的语义层库，负责内容表示、缓存身份、编译与复用语义。当前实现基于 `sempic_iclr` Native PIC，通过 vLLM 提供内容复用与推理服务；未来支持多后端。
 
 Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_tokens`，不启用 LoRA 时对应未压缩 KV Packet，配合 `writer_adapter` 时对应 Joint。显式与自动编译共用原生混合输入，保留 Pre/document/Post KV，并按完整长度推进 Reader 位置。配置格式见 [接入说明](docs/integration.md)。GPU 6 上的 Qwen3-0.6B 执行验证已通过，包含合成 rank-8 LoRA、chunked prefill、重复引用和缓存复用；[验证结果](runs/writer-soft-tokens-20260914/results.json)不构成方法质量或性能评测。
 
@@ -35,11 +35,13 @@ curl http://127.0.0.1:8000/v1/models
 
 ## 职责
 
-- **SemPIC**：模型方法、训练、Writer 编译语义与科研实现、方法导出、数据集、prompt 和评测语义。
-- **ReLoCache**：服务启停、内容接入与元数据持久化、请求渲染、编译与推理调用、客户端和服务指标。
-- **vLLM fork**：请求执行、原生缓存、缺失内容调度、offload、位置映射和 fused-RoPE attention。
+- **SemPIC**：模型方法、训练、Writer 编译策略、方法导出、数据集、prompt 和评测语义。
+- **ReLoCache**：位置无关缓存语义、内容管理与后端接入，并提供服务和客户端。
+- **vLLM**：原生请求执行、KV 页管理、调度和 offload；通过扩展接口接入复用能力。
 
-依赖方向为 `SemPIC → ReLoCache → vLLM fork`。当前只支持 vLLM。
+允许 vLLM fork 依赖并调用 ReLoCache。优先使用现有插件和扩展点，将后端细节留在接入模块；必要的 vLLM 修改以可提交上游的窄接口或执行能力为目标，保留原生功能与性能。避免包安装循环依赖，不要求上游 vLLM 强制安装 ReLoCache。
+
+这是目标边界。当前仅接入 vLLM，PIC 调度、位置映射和 fused-RoPE 等实现仍在 fork 中，尚未按此边界完成收敛。具体接入约定见 [docs/integration.md](docs/integration.md)。
 
 ## 仓库
 

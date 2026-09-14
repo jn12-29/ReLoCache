@@ -47,9 +47,13 @@ Content register/compile/get responses return the original document `input_ids` 
 
 ## ReLoCache to vLLM
 
-Move HTTP routes, content resolution, message rendering, metadata persistence, explicit compilation orchestration, and service configuration into ReLoCache. Reuse vLLM serving components and call the fork directly.
+ReLoCache is the semantic layer for position-independent caching: a library for content representation, cache identity, compilation, and reuse. Serving is one integration surface. SemPIC defines method-specific Writer compilation policy; ReLoCache executes that policy through backend integration.
 
-Keep native page identity and geometry, execution metadata transport, scheduler miss handling, concurrent compilation tracking, physical/logical placement, pre-RoPE KV, fused-RoPE attention, and offload lifecycle in the fork. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
+The architecture targets multiple backends; only vLLM is implemented today. Keep backend details such as block hashes, page geometry, scheduler messages, and attention metadata in backend integration modules. Extend from concrete needs rather than building a speculative backend framework.
+
+The vLLM fork may depend on and call ReLoCache. Prefer existing plugins and extension points, avoid package installation cycles, and keep ReLoCache optional for upstream vLLM. Place reuse logic in ReLoCache where the execution boundary permits; retain native KV allocation, reference counting, scheduling, cache lookup, and offload ownership. Necessary vLLM changes should be narrow interfaces or execution capabilities that can be understood and proposed upstream independently. Preserve native structure, functionality, and performance; reduce private implementation coupling rather than copying native logic to reduce the patch's file count.
+
+This is the target boundary. The current fork still implements PIC page identity, execution metadata transport, compilation coordination, physical/logical placement, pre-RoPE KV, and fused-RoPE attention. Moving these implementations behind extension interfaces remains future work. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
 
 Registration stores source tokens and Writer identity without an engine RPC. Reader input carries a content table and occurrence indices; the engine derives native page metadata before request hashing. Explicit compilation receives page padding and its final observation row in native input processing, before prompt-length validation. Workers receive only unique position mappings, occurrence placements, and physical segments. Identity mappings use contiguous ranges without entry-position tensors; explicit per-layer mappings share tensors across repeated occurrences.
 
@@ -79,4 +83,4 @@ Dependency version differences do not need to be reverted. HTTP connection polic
 
 ## Validation ownership
 
-The fork verifies cache and execution behavior; ReLoCache verifies service behavior; SemPIC verifies method outputs and evaluation semantics. Run all checks in new repositories and environments. Existing experiment results remain reference evidence, not validation of the extracted service.
+ReLoCache verifies cache semantics, backend integration, and service behavior; the fork verifies changes to native execution; SemPIC verifies method outputs and evaluation semantics. Run all checks in new repositories and environments. Existing experiment results remain reference evidence, not validation of the extracted service.
