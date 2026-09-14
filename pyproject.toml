@@ -1,0 +1,52 @@
+[project]
+name = "relocache"
+version = "0.1.0"
+description = "Reusable-content serving with native vLLM PIC execution"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = ["httpx>=0.28.1"]
+
+[project.optional-dependencies]
+server = ["vllm", "torch==2.13.0"]
+demo = ["peft>=0.20.0", "safetensors>=0.8.0", "rouge-score>=0.1.2"]
+
+[project.scripts]
+relocache = "relocache.cli:main"
+
+[project.entry-points."vllm.endpoint_plugins"]
+relocache = "relocache.api:ReLoCacheEndpoints"
+
+[build-system]
+requires = ["setuptools>=77,<81"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["relocache*"]
+
+[tool.uv]
+cache-dir = ".cache/uv"
+no-build-isolation-package = ["vllm"]
+
+[tool.uv.sources]
+vllm = { path = "third_party/vllm", editable = true }
+
+[tool.uv.extra-build-variables.vllm]
+VLLM_USE_PRECOMPILED = "1"
+VLLM_PRECOMPILED_WHEEL_COMMIT = "08b3e67b669d18d5bbd14e456b8bb4794916e402"
+VLLM_VERSION_OVERRIDE = "0.28.1rc1.dev590+g08b3e67b6.relocache"
+
+[dependency-groups]
+dev = [
+    "cmake>=4.4.3", "ninja>=1.13.2", "pytest>=9.1.1", "ruff>=0.16.6",
+    "setuptools>=77,<81", "setuptools-rust>=1.13.0", "setuptools-scm>=10.2.3",
+    "wheel>=0.48.0", "pre-commit>=4",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["third_party"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
