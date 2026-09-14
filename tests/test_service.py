@@ -1,13 +1,15 @@
 """Protect content identity and native compilation through HTTP."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from pydantic import ValidationError
-from vllm.config import KVTransferConfig
+from vllm.config import KVTransferConfig, LoRAConfig
+from vllm.lora.peft_helper import PEFTHelper
 
 from relocache.api import router
 from relocache.client import Client
@@ -40,6 +42,40 @@ class Engine:
                 )
             ],
         )
+
+
+@pytest.mark.parametrize(
+    "rank,capacity,expected",
+    [(1, None, 1), (2, None, 8), (4, None, 8), (12, None, 16), (4, 32, 32)],
+)
+def test_writer_rank_maps_to_native_capacity_and_preserves_explicit_config(
+    tmp_path, rank, capacity, expected
+):
+    adapter = {"r": rank, "lora_alpha": 16, "target_modules": ["q_proj"]}
+    (tmp_path / "adapter_config.json").write_text(json.dumps(adapter))
+    engine = {} if capacity is None else {"max_lora_rank": capacity}
+    options = engine_options(
+        {"model": "/model", "method_id": "writer", "writer_adapter": tmp_path, "engine": engine}
+    )
+    native = LoRAConfig(max_lora_rank=options["max_lora_rank"])
+    PEFTHelper.from_dict(adapter).validate_legal(native)
+    assert native.max_lora_rank == expected
+    assert engine == ({} if capacity is None else {"max_lora_rank": capacity})
+
+
+@pytest.mark.parametrize("rank,capacity", [(16, 8), (513, None), (4, 4)])
+def test_writer_rejects_insufficient_or_unsupported_native_capacity(tmp_path, rank, capacity):
+    (tmp_path / "adapter_config.json").write_text(json.dumps({"r": rank}))
+    with pytest.raises(ValueError):
+        options = engine_options(
+            {
+                "model": "/model",
+                "method_id": "writer",
+                "writer_adapter": tmp_path,
+                "engine": {} if capacity is None else {"max_lora_rank": capacity},
+            }
+        )
+        LoRAConfig(max_lora_rank=options["max_lora_rank"])
 
 
 def test_responses_preserve_structured_parts_in_assistant_history():

@@ -3,6 +3,7 @@
 import json
 from copy import deepcopy
 from pathlib import Path
+from typing import get_args
 
 
 def engine_options(config):
@@ -21,9 +22,21 @@ def engine_options(config):
     writer_path = config.get("writer_adapter")
     writer = None
     if writer_path:
+        from vllm.config.lora import MaxLoRARanks
+
         writer_path = Path(writer_path).resolve()
         adapter = json.loads((writer_path / "adapter_config.json").read_text())
-        options.update(enable_lora=True, max_lora_rank=adapter["r"])
+        rank = adapter["r"]
+        if "max_lora_rank" not in options:
+            capacities = get_args(MaxLoRARanks)
+            if rank > max(capacities):
+                raise ValueError(f"Writer rank {rank} exceeds vLLM's maximum {max(capacities)}")
+            options["max_lora_rank"] = min(capacity for capacity in capacities if capacity >= rank)
+        if options["max_lora_rank"] < rank:
+            raise ValueError(
+                f"max_lora_rank={options['max_lora_rank']} is smaller than Writer rank {rank}"
+            )
+        options["enable_lora"] = True
         writer = {"lora_name": config["method_id"], "lora_int_id": 1, "lora_path": str(writer_path)}
     options["additional_config"] = {
         **options.get("additional_config", {}),
