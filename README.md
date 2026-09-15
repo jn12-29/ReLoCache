@@ -6,6 +6,8 @@ Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_token
 
 独立环境已安装，服务逻辑已迁移，已修正元数据持久化、KV 持久化检查、connector 配置合并和请求 schema 的迁移偏差。Qwen3-8B P16 demo 已在 GPU 4–7、DP=4、TP=1 下完成六个数据集各一个样本的 Full Prefill/PIC 对比，共 12 次请求全部成功；结果见 [metrics.json](runs/sempic-demo-20260914/metrics.json)。本次验证包含 LoRA Writer 自动编译和 Reader soft tokens，不构成正式质量或性能评测。
 
+后续工作、实施顺序与完成标准见 [TODO 与未来计划](docs/roadmap.md)。
+
 ## 启动
 
 在 ReLoCache 根目录使用已有环境，等待 GPU 4–7 空闲后执行：
