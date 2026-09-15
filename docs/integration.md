@@ -8,7 +8,7 @@ SemPIC exports a deployment description containing model/tokenizer identity, Wri
 
 Full Prefill uses `/v1/completions` for text or token IDs, or `/v1/chat/completions` for messages. PIC uses structured reusable-content references and, when requested by the method, prompt embeddings through the Chat/Responses APIs. ReLoCache resolves references and renders them for native execution. Both paths retain native generation-parameter handling, streaming, and response semantics.
 
-SemPIC chooses the task prompt, chat template, content boundaries, and soft-token placement. ReLoCache executes the supplied rendering instructions; it does not choose them from dataset or method names. Content registration accepts text or token IDs. Token IDs remain useful for research-controlled inputs without becoming the required public generation format.
+For training and evaluation, SemPIC chooses the task prompt, chat template, content boundaries, and soft-token placement. ReLoCache executes the supplied rendering instructions; it does not choose them from dataset or method names. Content registration accepts text or token IDs. Token IDs remain useful for research-controlled inputs without becoming the required public generation format.
 
 Datasets, answers, Teacher/Student roles, soft-token placement policy, scoring, aggregation, and latency experiment protocols remain in SemPIC. The client package must be usable without installing vLLM into the research environment.
 
@@ -47,11 +47,11 @@ Content register/compile/get responses return the original document `input_ids` 
 
 ## ReLoCache to vLLM
 
-ReLoCache is the semantic layer for position-independent caching: a library for content representation, cache identity, compilation, and reuse. Serving is one integration surface. SemPIC defines method-specific Writer compilation policy; ReLoCache executes that policy through backend integration.
+ReLoCache is a position-independent caching library for efficient inference serving. It owns PIC semantics and core implementations, including cache compilation, content reuse, and PIC-specific inference components such as compilation coordination, position mapping, and attention. SemPIC primarily owns training and evaluation semantics and exports the trained artifacts and configuration used for serving.
 
 The architecture targets multiple backends; only vLLM is implemented today. Keep backend details such as block hashes, page geometry, scheduler messages, and attention metadata in backend integration modules. Extend from concrete needs rather than building a speculative backend framework.
 
-The vLLM fork may depend on and call ReLoCache. Prefer existing plugins and extension points, avoid package installation cycles, and keep ReLoCache optional for upstream vLLM. Place reuse logic in ReLoCache where the execution boundary permits; retain native KV allocation, reference counting, scheduling, cache lookup, and offload ownership. Necessary vLLM changes should be narrow interfaces or execution capabilities that can be understood and proposed upstream independently. Preserve native structure, functionality, and performance; reduce private implementation coupling rather than copying native logic to reduce the patch's file count.
+Inference backends integrate ReLoCache components through plugins, extension points, and the minimum necessary core changes. The vLLM fork may depend on and call ReLoCache; avoid package installation cycles and keep ReLoCache optional for upstream vLLM. Reuse native KV allocation, reference counting, scheduling, cache lookup, and offload mechanisms. Necessary vLLM changes should be narrow interfaces or execution capabilities that can be understood and proposed upstream independently. Preserve native structure, functionality, and performance; reduce private implementation coupling rather than copying native logic to reduce the patch's file count.
 
 This is the target boundary. The current fork still implements PIC page identity, execution metadata transport, compilation coordination, physical/logical placement, pre-RoPE KV, and fused-RoPE attention. Moving these implementations behind extension interfaces remains future work. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
 
@@ -83,4 +83,4 @@ Dependency version differences do not need to be reverted. HTTP connection polic
 
 ## Validation ownership
 
-ReLoCache verifies cache semantics, backend integration, and service behavior; the fork verifies changes to native execution; SemPIC verifies method outputs and evaluation semantics. Run all checks in new repositories and environments. Existing experiment results remain reference evidence, not validation of the extracted service.
+ReLoCache verifies PIC core components, cache semantics, backend integration, and service behavior; the fork verifies changes to native execution; SemPIC verifies training and evaluation semantics and assesses method quality. Run all checks in new repositories and environments. Existing experiment results remain reference evidence, not validation of the extracted service.
