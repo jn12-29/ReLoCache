@@ -61,15 +61,16 @@ def rotate_keys(
     logical_k,
     offs_d,
     tile_mask,
-    rope_inv_freq_ptr,
-    cos_sin_cache_ptr,
     dtype: tl.constexpr,
-    ROTARY_DIM: tl.constexpr,
-    ROPE_IS_NEOX_STYLE: tl.constexpr,
-    ROPE_ATTENTION_SCALING: tl.constexpr,
     HEAD_SIZE_PADDED: tl.constexpr,
     TILE_SIZE: tl.constexpr,
+    tensors,
+    config: tl.constexpr,
 ):
+    rope_inv_freq_ptr, cos_sin_cache_ptr = tensors
+    ROTARY_DIM: tl.constexpr = config[0]
+    ROPE_IS_NEOX_STYLE: tl.constexpr = config[1]
+    ROPE_ATTENTION_SCALING: tl.constexpr = config[2]
     if ROPE_IS_NEOX_STYLE:
         partner_dim = (offs_d + ROTARY_DIM // 2) % ROTARY_DIM
         frequency_index = offs_d % (ROTARY_DIM // 2)

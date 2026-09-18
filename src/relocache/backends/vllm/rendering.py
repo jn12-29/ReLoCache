@@ -2,17 +2,19 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 """Resolve reusable references while retaining canonical model token IDs."""
 
+import asyncio
 from dataclasses import replace
 from uuid import uuid4
 
 from vllm.renderers.embed_utils import safe_load_prompt_embeds_async
 from vllm.renderers.hf import _build_mixed_prompt_embeds
+from vllm.renderers.online_renderer import OnlineRenderer, ResponsesRenderResult
 
 from relocache.content import ContentError
 from relocache.inputs import assemble_input
 
 from .protocol import response_message_kind
-from .transport import encode_input
+from .transport import input_metadata
 
 
 def convert_response_input(item):
@@ -99,9 +101,11 @@ async def render_reader_input(
         [prompt], tok_params, prompt_extras=prompt_extras, skip_mm_cache=skip_mm_cache
     )
     if spans:
-        engine_input["extension"] = encode_input(
-            [service.native_content(content) for content in prepared.contents], spans
-        )
+        engine_input["extra_args"] = {
+            "relocache": input_metadata(
+                [service.native_content(content) for content in prepared.contents], spans
+            )
+        }
     return engine_input
 
 
@@ -162,3 +166,79 @@ async def render_reusable_chat(
         skip_mm_cache=skip_mm_cache,
     )
     return conversation, engine_input
+
+
+class ReaderRenderer:
+    """Extend chat rendering while sharing the native renderer and its caches."""
+
+    def __init__(self, renderer):
+        self.native = renderer
+        self.service = None
+
+    def __getattr__(self, name):
+        return getattr(self.native, name)
+
+    async def render_chat_async(self, conversations, chat_params, tok_params=None, **kwargs):
+        async def render(messages):
+            result = await render_reusable_chat(
+                self.native,
+                messages,
+                chat_params,
+                tok_params,
+                service=self.service,
+                **kwargs,
+            )
+            if result is not None:
+                return result
+            (conversation,), (prompt,) = await self.native.render_chat_async(
+                [messages], chat_params, tok_params, **kwargs
+            )
+            return conversation, prompt
+
+        results = await asyncio.gather(*(render(messages) for messages in conversations))
+        return [r[0] for r in results], [r[1] for r in results]
+
+
+class PICOnlineRenderer(OnlineRenderer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.renderer = ReaderRenderer(self.renderer)
+
+    convert_response_input = staticmethod(convert_response_input)
+
+    @staticmethod
+    def bind_metadata(request, engine_inputs):
+        for prompt in engine_inputs:
+            if extra := prompt.pop("extra_args", None):
+                request._relocache_input = extra["relocache"]
+
+    async def preprocess_completion(self, request, *args, **kwargs):
+        result = await render_reusable_completion(
+            self.renderer.native,
+            request,
+            service=self.renderer.service,
+            skip_mm_cache=kwargs.get("skip_mm_cache", False),
+        )
+        return (
+            result
+            if result is not None
+            else await super().preprocess_completion(request, *args, **kwargs)
+        )
+
+    async def render_completion(self, request, **kwargs):
+        result = await super().render_completion(request, **kwargs)
+        if isinstance(result, list):
+            self.bind_metadata(request, result)
+        return result
+
+    async def render_chat(self, request, **kwargs):
+        result = await super().render_chat(request, **kwargs)
+        if isinstance(result, tuple):
+            self.bind_metadata(request, result[1])
+        return result
+
+    async def render_responses(self, request, **kwargs):
+        result = await super().render_responses(request, **kwargs)
+        if isinstance(result, ResponsesRenderResult):
+            self.bind_metadata(request, [result.engine_input])
+        return result

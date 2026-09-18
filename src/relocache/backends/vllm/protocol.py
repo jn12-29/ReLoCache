@@ -8,7 +8,15 @@ from openai.types.chat import (
     ChatCompletionMessageToolCallParam,
 )
 from openai.types.responses import ResponseInputTextParam, ResponseOutputTextParam
-from pydantic import AfterValidator, BaseModel, Discriminator, Field, Tag, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Discriminator,
+    Field,
+    PrivateAttr,
+    Tag,
+    model_validator,
+)
 from typing_extensions import TypedDict
 from vllm.entrypoints.chat_utils import (
     ChatCompletionContentPartPromptEmbedsParam,
@@ -49,7 +57,17 @@ class BlockPrompt(TypedDict):
     ]
 
 
-class ReusableCompletionRequest(CompletionRequest):
+class ReusableInput(BaseModel):
+    _relocache_input: dict | None = PrivateAttr(default=None)
+
+    def to_sampling_params(self, *args, **kwargs):
+        params = super().to_sampling_params(*args, **kwargs)
+        if self._relocache_input is not None:
+            params.extra_args = {**(params.extra_args or {}), "relocache": self._relocache_input}
+        return params
+
+
+class ReusableCompletionRequest(ReusableInput, CompletionRequest):
     prompt: (
         BlockPrompt
         | list[Annotated[int, Field(ge=0)]]
@@ -117,7 +135,7 @@ def response_message_kind(message):
     return message_kind(message, types=("reusable_content", "prompt_embeds"))
 
 
-class ReusableChatRequest(ChatCompletionRequest):
+class ReusableChatRequest(ReusableInput, ChatCompletionRequest):
     messages: list[
         Annotated[
             Annotated[ReusableChatMessage, Tag("reusable")]
@@ -127,7 +145,7 @@ class ReusableChatRequest(ChatCompletionRequest):
     ]
 
 
-class ReusableResponsesRequest(ResponsesRequest):
+class ReusableResponsesRequest(ReusableInput, ResponsesRequest):
     input: (
         str
         | list[

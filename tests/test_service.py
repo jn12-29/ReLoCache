@@ -188,12 +188,10 @@ def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage, w
             prompt, _sampling, kwargs = engine.requests[0]
             assert kwargs["lora_request"].lora_name == "writer"
             assert prompt["prompt_token_ids"][:2] == [21, 22]
-            from relocache.backends.vllm.transport import decode_input
-
-            source = decode_input(prompt["extension"])["contents"][0]
+            source = _sampling.extra_args["relocache"]["contents"][0]
             assert source["input_ids"] == [21, 22]
             if writer_soft:
-                tensor = source["writer_soft_tokens"]["post"]
+                tensor = prompt["prompt_embeds"][2:4]
                 torch.testing.assert_close(tensor, torch.full((2, 4), 0.5))
             if storage == "fs":
                 engine.pending = [True, False]
@@ -219,7 +217,6 @@ def test_connector_settings_survive_pre_rope_configuration(tmp_path, shortcuts):
             "spec_name": "TieringOffloadingSpec",
             "cpu_bytes_to_use": 4096,
             "eviction_policy": "arc",
-            "key_encoding": "rope",
             "secondary_tiers": [{"type": "obj", "bucket_name": "existing"}],
         },
     }
@@ -234,13 +231,16 @@ def test_connector_settings_survive_pre_rope_configuration(tmp_path, shortcuts):
         config.update(cpu_bytes_to_use=8192, kv_dir=str(tmp_path))
     options = engine_options(config)
     extra = options["kv_transfer_config"]["kv_connector_extra_config"]
-    assert extra["key_encoding"] == "pre_rope"
     assert extra["eviction_policy"] == "arc"
     assert extra["cpu_bytes_to_use"] == (8192 if shortcuts else 4096)
-    assert extra["secondary_tiers"][0] == {"type": "obj", "bucket_name": "existing"}
+    assert extra["secondary_tiers"][0] == {
+        "type": "obj",
+        "bucket_name": "existing",
+        "prefix": "pre_rope",
+    }
     if shortcuts:
-        assert extra["secondary_tiers"][1] == {"type": "fs", "root_dir": str(tmp_path)}
-    assert transfer["kv_connector_extra_config"]["key_encoding"] == "rope"
+        assert extra["secondary_tiers"][1] == {"type": "fs", "root_dir": str(tmp_path / "pre_rope")}
+    assert "prefix" not in transfer["kv_connector_extra_config"]["secondary_tiers"][0]
     assert len(transfer["kv_connector_extra_config"]["secondary_tiers"]) == 1
 
 
@@ -256,7 +256,10 @@ def test_reusable_schema_validates_references_without_changing_native_inputs(
     field,
     text_type,
 ):
-    native = request_class.__bases__[0]
+    from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionRequest
+    from vllm.entrypoints.openai.responses.protocol import ResponsesRequest
+
+    native = ChatCompletionRequest if field == "messages" else ResponsesRequest
     ordinary = [{"role": "user", "content": [{"type": text_type, "text": "Question"}]}]
     assert request_class(**{field: ordinary}).model_dump(mode="json", include={field}) == native(
         **{field: ordinary}
@@ -397,8 +400,6 @@ def test_compile_registered_id_and_content_errors_through_http():
 
 
 def test_chat_and_token_blocks_share_native_tokens_embeddings_and_pic_positions(tmp_path):
-    from functools import partial
-
     from tokenizers import Tokenizer
     from tokenizers.models import WordLevel
     from tokenizers.pre_tokenizers import Whitespace
@@ -406,10 +407,9 @@ def test_chat_and_token_blocks_share_native_tokens_embeddings_and_pic_positions(
     from vllm.config import ModelConfig, VllmConfig
     from vllm.renderers import ChatParams, TokenizeParams
     from vllm.renderers.hf import HfRenderer
-    from vllm.renderers.online_renderer import OnlineRenderer
 
     from relocache.backends.vllm.protocol import ReusableCompletionRequest
-    from relocache.backends.vllm.rendering import render_reusable_chat, render_reusable_completion
+    from relocache.backends.vllm.rendering import PICOnlineRenderer, render_reusable_chat
 
     tokenizer_impl = Tokenizer(WordLevel({"<unk>": 0, "Context": 1, "Answer": 2}))
     tokenizer_impl.pre_tokenizer = Whitespace()
@@ -460,14 +460,14 @@ def test_chat_and_token_blocks_share_native_tokens_embeddings_and_pic_positions(
     template = "{{ messages[0]['content'] }}"
 
     async def check():
-        online = OnlineRenderer(
+        online = PICOnlineRenderer(
             config.model_config,
             renderer,
             request_logger=None,
             chat_template=template,
             chat_template_content_format="string",
         )
-        online.completion_input_renderer = partial(render_reusable_completion, service=service)
+        online.renderer.service = service
         request = ReusableCompletionRequest(
             prompt={
                 "blocks": [
@@ -520,8 +520,8 @@ def test_chat_and_token_blocks_share_native_tokens_embeddings_and_pic_positions(
             ]
         )
         assert (
-            exact["extension"].data["spans"]
-            == chat["extension"].data["spans"]
+            request._relocache_input["spans"]
+            == chat["extra_args"]["relocache"]["spans"]
             == [
                 (1, 5, 0),
                 (8, 5, 0),

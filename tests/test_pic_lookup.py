@@ -39,7 +39,7 @@ from relocache.backends.vllm.cache import prepare_reusable_request
 from relocache.backends.vllm.request import PICRequest as Request
 from relocache.backends.vllm.request import pic_hasher
 from relocache.backends.vllm.scheduler import PICScheduler as Scheduler
-from relocache.backends.vllm.transport import encode_input
+from relocache.backends.vllm.transport import input_metadata
 from relocache.backends.vllm.types import ReusableSpan
 
 
@@ -149,7 +149,7 @@ def test_engine_builds_pages_from_sources_and_transports_only_layout(
     from vllm.v1.serial_utils import MsgpackDecoder, MsgpackEncoder
 
     from relocache.backends.vllm.compiler import compile_inputs, compile_prompt
-    from relocache.backends.vllm.transport import encode_input
+    from relocache.backends.vllm.transport import input_metadata
     from relocache.layout import PICLayout
 
     engine = EngineCore.__new__(EngineCore)
@@ -173,10 +173,13 @@ def test_engine_builds_pages_from_sources_and_transports_only_layout(
             "post": torch.full((post, 64), 0.75),
         }
     ids, params, _ = compile_inputs(source)
-    params.extra_args = {"custom_sampler": "preserved"}
+    params.extra_args = {
+        "custom_sampler": "preserved",
+        "relocache": input_metadata([source], compile=True),
+    }
     wire = input_processor.process_inputs(
         "writer",
-        {**compile_prompt(source, 4), "extension": encode_input([source], compile=True)},
+        compile_prompt(source, 4),
         params,
         ("generate",),
     )
@@ -187,7 +190,7 @@ def test_engine_builds_pages_from_sources_and_transports_only_layout(
     decoder = MsgpackDecoder(EngineCoreRequest)
     writer, _ = engine.preprocess_add_request(decoder.decode(MsgpackEncoder().encode(wire)))
     assert writer.pic_compile["groups"][0]["num_slots"] == capacity
-    assert writer.sampling_params.extra_args == {"custom_sampler": "preserved"}
+    assert writer.sampling_params.extra_args["custom_sampler"] == "preserved"
     if pre or post:
         assert writer.prompt_is_token_ids == (
             [False] * pre + [True] * num_tokens + [False] * post + [True] * (capacity - length + 1)
@@ -201,11 +204,11 @@ def test_engine_builds_pages_from_sources_and_transports_only_layout(
 
     wrapped = [0] * pre + ids + [0] * post
     tokens = [1, *wrapped, 2, *wrapped, 3]
-    reusable = encode_input([source], [(1, length, 0), (length + 2, length, 0)])
+    reusable = input_metadata([source], [(1, length, 0), (length + 2, length, 0)])
     wire = input_processor.process_inputs(
         "reader",
-        {"type": "token", "prompt_token_ids": tokens, "extension": reusable},
-        SamplingParams(max_tokens=2),
+        {"type": "token", "prompt_token_ids": tokens},
+        SamplingParams(max_tokens=2, extra_args={"relocache": reusable}),
         ("generate",),
     )
     reader, _ = engine.preprocess_add_request(decoder.decode(MsgpackEncoder().encode(wire)))
@@ -359,18 +362,17 @@ def test_native_writer_hashes_and_reader_use_the_same_pages(manager):
     hashes = metadata["groups"][0]["block_hashes"]
     ids, params, lora = compile_inputs(metadata)
     ids = compile_token_ids(ids, 4)
+    params.extra_args = {"relocache": input_metadata([metadata], compile=True)}
     writer = Request(
         "writer",
         ids,
         params,
         None,
-        extension=encode_input([metadata], compile=True),
         lora_request=lora,
         block_hasher=pic_hasher(get_request_block_hasher(4, sha256), 4, sha256),
     )
     assert ids == [20, 21, 22, 23, 24, 0, 0, 0, 0]
     assert writer.block_hashes == hashes
-    assert writer.sampling_params.extra_args is None
     cache(manager, writer)
     blocks, count, _ = manager.get_computed_blocks(writer)
     assert count == 8  # A cache hit does not recompute the last document page.
@@ -385,13 +387,13 @@ def test_native_writer_hashes_and_reader_use_the_same_pages(manager):
     extension = native_content(manager, "extension", [20, 21, 22, 23, 25, 26])
     ids, params, lora = compile_inputs(extension)
     ids = compile_token_ids(ids, 4)
+    params.extra_args = {"relocache": input_metadata([extension], compile=True)}
     next_writer = Request(
         "next-writer",
         ids,
         params,
         None,
         lora_request=lora,
-        extension=encode_input([extension], compile=True),
         block_hasher=pic_hasher(get_request_block_hasher(4, sha256), 4, sha256),
     )
     prefix_blocks, count, _ = manager.get_computed_blocks(next_writer)
@@ -612,8 +614,12 @@ def test_missing_documents_enqueue_together_but_hits_and_pending_loads_do_not(
         "pre": torch.full((1, 64), 0.25),
         "post": torch.full((1, 64), 0.75),
     }
+    for document in documents:
+        document["input_ids"] = [21]
+        document["writer_soft_tokens"] = documents[0]["writer_soft_tokens"]
     ids, params, lora = compile_inputs(documents[1])
     ids = compile_token_ids(ids, 4)
+    params.extra_args = {"relocache": input_metadata([documents[1]], compile=True)}
     cache(
         manager,
         Request(
@@ -622,7 +628,6 @@ def test_missing_documents_enqueue_together_but_hits_and_pending_loads_do_not(
             params,
             None,
             lora_request=lora,
-            extension=encode_input([documents[1]], compile=True),
             block_hasher=pic_hasher(get_request_block_hasher(4, sha256), 4, sha256),
         ),
     )
@@ -640,6 +645,7 @@ def test_missing_documents_enqueue_together_but_hits_and_pending_loads_do_not(
     scheduler = SimpleNamespace(
         vllm_config=SimpleNamespace(additional_config={"relocache": {"auto_compile": True}}),
         kv_cache_manager=manager,
+        writer_soft_tokens=documents[0]["writer_soft_tokens"],
         compiles=SimpleNamespace(active={}),
         offload=SimpleNamespace(lookup_key=lambda request_id, key: cpu.lookup(key, context)),
     )

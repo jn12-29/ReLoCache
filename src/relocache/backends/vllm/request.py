@@ -3,13 +3,13 @@
 from vllm.v1.request import Request
 
 from .cache import dynamic_content_ranges, hash_reusable_request
-from .transport import decode_input
 from .types import ReusableSpan
 
 
 class PICRequest(Request):
-    def __init__(self, *args, extension=None, reusable_spans=None, **kwargs):
-        data = decode_input(extension) if extension is not None else None
+    def __init__(self, *args, reusable_spans=None, **kwargs):
+        sampling = kwargs.get("sampling_params", args[2] if len(args) > 2 else None)
+        data = (sampling.extra_args or {}).get("relocache") if sampling else None
         self.pic_compile = data["contents"][0] if data and data["compile"] else None
         self.reusable_spans = reusable_spans or (
             [
@@ -41,7 +41,7 @@ class PICRequest(Request):
             "prefill_tokens_executed": 0,
         }
         self.wait_started = None
-        super().__init__(*args, extension=extension, **kwargs)
+        super().__init__(*args, **kwargs)
         self.internal = bool(data and data["internal"])
         self.operation_id = data["operation_id"] if data else None
         self.required_cached_tokens = sum(

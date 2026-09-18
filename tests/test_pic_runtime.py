@@ -10,6 +10,22 @@ from relocache.backends.vllm.worker import PICInputBuffers
 from relocache.layout import PICContentLayout, PICLayout, PICOccurrence
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA position mapping")
+def test_position_mapping_uses_request_slots_and_leaves_dummy_positions_native():
+    from relocache.backends.vllm.positions import map_positions
+
+    storage = torch.tensor([4, 5, 8, 9, 10], device="cuda", dtype=torch.int64)
+    logical = torch.empty_like(storage)
+    indices = torch.tensor([2, 0], device="cuda", dtype=torch.int64)
+    offsets = torch.tensor([0, 2, 5], device="cuda", dtype=torch.int32)
+    mapping = torch.arange(20, device="cuda", dtype=torch.int64) + 100
+    pointers = torch.tensor([0, 0, mapping.data_ptr()], device="cuda", dtype=torch.int64)
+    map_positions(storage, logical, indices, offsets, pointers)
+    assert logical.tolist() == [104, 105, 8, 9, 10]
+    map_positions(storage, logical, indices, offsets, None)
+    torch.testing.assert_close(logical, storage)
+
+
 def test_contiguous_mapping_shares_layers_and_trims_reordered_tail_pages():
     layout = PICLayout(
         canonical_length=13,

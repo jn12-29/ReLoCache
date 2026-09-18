@@ -13,7 +13,7 @@ def engine_options(config):
         revision=config.get("revision"),
         tokenizer=config.get("tokenizer", config["model"]),
         served_model_name=[config.get("served_model_name", "reader")],
-        attention_backend="TRITON_ATTN",
+        attention_backend="CUSTOM",
         enable_prefix_caching=True,
         enable_per_request_metrics=True,
         disable_log_stats=False,
@@ -48,6 +48,7 @@ def engine_options(config):
     options["additional_config"] = {
         **options.get("additional_config", {}),
         "position_free_kv": True,
+        "online_renderer_cls": "relocache.backends.vllm.rendering.PICOnlineRenderer",
         "model_state_cls": "relocache.backends.vllm.worker.PICModelStateAdapter",
         "relocache": {
             "auto_compile": config.get("auto_compile", True),
@@ -80,7 +81,11 @@ def engine_options(config):
                 {"type": "fs", "root_dir": str(Path(kv_dir).resolve())}
             )
     if options.get("kv_transfer_config") is not None:
-        options["kv_transfer_config"].setdefault("kv_connector_extra_config", {})[
-            "key_encoding"
-        ] = "pre_rope"
+        extra = options["kv_transfer_config"].setdefault("kv_connector_extra_config", {})
+        for tier in extra.get("secondary_tiers", []):
+            if tier["type"] == "fs":
+                tier["root_dir"] = str(Path(tier["root_dir"]) / "pre_rope")
+            elif tier["type"] == "obj":
+                prefix = tier.get("prefix", "").rstrip("/")
+                tier["prefix"] = f"{prefix}/pre_rope" if prefix else "pre_rope"
     return options

@@ -1,6 +1,8 @@
 # vLLM 最小侵入接入评估
 
-评估日期：2026-09-18。源码基线为 `upstream-base`（`08b3e67b669d18d5bbd14e456b8bb4794916e402`），当前 fork 为 `70f75ac`。本文评估两个版本的累计差异，不以中间提交衡量收缩效果。结论来自本地固定版本的调用路径和扩展接口；没有修改运行代码，也没有把候选方案计为已验证实现。
+评估日期：2026-09-18。源码基线为 `upstream-base`（`08b3e67b669d18d5bbd14e456b8bb4794916e402`），评估对象为 fork `70f75ac`。以下保留实施前的源码分析；文中的“当前”指该评估快照。最新累计差异以[修改清单](vllm-patch.md)为准，执行结果见[验证记录](decoupling-validation.md)。
+
+后续已落实元数据通道合并、部署级 Writer 加载、原生存储路径隔离、OnlineRenderer 构造接口、外置位置映射和外部 attention backend。渲染使用 BaseRenderer 组合而非覆盖全局 renderer registry，共享已有对象及其缓存；原生 InputProcessor 也已恢复。累计补丁为 22 个源码文件、`+314/-44`。attention kernel 的 RoPE 参数已替换为通用变换参数，具体配置属于 ReLoCache。以下候选清单不是待办列表。
 
 ## 结论
 

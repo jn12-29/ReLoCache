@@ -124,10 +124,8 @@ def test_ordered_ranges_skip_pad_and_future_pic_in_captured_attention(
             logical_ranges=pointers,
             logical_range_counts=counts,
             query_positions=q_positions,
-            cos_sin_cache=table,
-            rope_inv_freq=frequencies,
-            rope_is_neox_style=neox,
-            rope_attention_scaling=amplitude,
+            key_transform_tensors=(frequencies, table),
+            key_transform_config=(rotary_dim, neox, amplitude),
         )
 
     def oracle(keys, visible):
@@ -221,9 +219,7 @@ def test_ordered_ranges_skip_pad_and_future_pic_in_captured_attention(
         logical_ranges=pointers,
         logical_range_counts=counts,
         query_positions=q_positions[-1:],
-        cos_sin_cache=table,
-        rope_inv_freq=frequencies,
-        rope_is_neox_style=neox,
-        rope_attention_scaling=amplitude,
+        key_transform_tensors=(frequencies, table),
+        key_transform_config=(rotary_dim, neox, amplitude),
     )
     torch.testing.assert_close(decode_output.float(), expected[-1:], atol=0.025, rtol=0.025)

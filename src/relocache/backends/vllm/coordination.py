@@ -9,7 +9,7 @@ def defer_missing_content(scheduler, request, num_computed_tokens: int) -> bool:
     from relocache.compilation import compilation_action
 
     from .request import PICRequest
-    from .transport import encode_input
+    from .transport import input_metadata
 
     if num_computed_tokens >= request.pic_layout.precomputed_length:
         return False
@@ -48,7 +48,11 @@ def defer_missing_content(scheduler, request, num_computed_tokens: int) -> bool:
             scheduler.admission_errors[request.request_id] = "reusable_cache_miss"
             return True
         _, params, lora = compile_inputs(content)
-        prompt = compile_prompt(content, content["groups"][0]["block_size"])
+        params.extra_args = {"relocache": input_metadata([content], compile=True, internal=True)}
+        prompt = compile_prompt(
+            {**content, "writer_soft_tokens": scheduler.writer_soft_tokens},
+            content["groups"][0]["block_size"],
+        )
         child = PICRequest(
             f"pic:{compiled_id}",
             prompt["prompt_token_ids"],
@@ -58,7 +62,6 @@ def defer_missing_content(scheduler, request, num_computed_tokens: int) -> bool:
             prompt_embeds=prompt.get("prompt_embeds"),
             prompt_is_token_ids=prompt.get("is_token_ids"),
             block_hasher=request._block_hasher,
-            extension=encode_input([content], compile=True, internal=True),
             arrival_time=request.arrival_time,
             priority=request.priority,
         )

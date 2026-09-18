@@ -1,7 +1,5 @@
 """ReLoCache routes composed with native vLLM serving handlers."""
 
-from functools import partial
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from vllm.entrypoints.openai.chat_completion.api_router import create_chat_completion
@@ -18,7 +16,6 @@ from .protocol import (
     ReusableCompletionRequest,
     ReusableResponsesRequest,
 )
-from .rendering import convert_response_input, render_reusable_chat, render_reusable_completion
 
 router = APIRouter()
 
@@ -107,12 +104,4 @@ class ReLoCacheEndpoints:
     async def init_state(self, engine_client, state, args):
         config = engine_client.vllm_config.additional_config["relocache"]
         state.relocache = ContentService(engine_client, config)
-        state.online_renderer.response_input_converter = convert_response_input
-        state.online_renderer.chat_input_renderer = partial(
-            render_reusable_chat,
-            service=state.relocache,
-        )
-        state.online_renderer.completion_input_renderer = partial(
-            render_reusable_completion,
-            service=state.relocache,
-        )
+        state.online_renderer.renderer.service = state.relocache

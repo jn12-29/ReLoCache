@@ -1,16 +1,62 @@
 # PIC 解耦验证
 
-日期：2026-09-18。当前 PIC 核心、vLLM 接入、生命周期与请求统计拆分已完成。SemPIC 方法集成、正式质量/性能评测与后续方法扩展仍按[路线图](roadmap.md)推进。
+日期：2026-09-18。本页记录 PIC 核心、vLLM 接入、生命周期与请求统计拆分的已执行验证。SemPIC 方法集成、正式质量/性能评测与后续方法扩展仍按[路线图](roadmap.md)推进。
 
 ## 实现边界
 
-PIC 内容与 Writer 身份、编译协调、逻辑位置和 fused-RoPE 实现属于 ReLoCache；页哈希、请求/调度子类、IPC、worker buffers 属于 `backends.vllm`。相对 `upstream-base`，fork 保留必要的执行接口和原生 KV 管理、offload、attention 主循环；完整累计差异见 [vLLM 修改边界](vllm-patch.md)。PIC 测试由主仓库维护。
+PIC 内容与 Writer 身份、编译协调、逻辑位置和 fused-RoPE 实现属于 ReLoCache；页哈希、请求/调度子类、IPC、worker buffers 属于 `backends.vllm`。相对 `upstream-base`，fork 扩展执行接口，继续复用原生 KV 管理、offload、attention 主循环；完整累计差异见 [vLLM 修改边界](vllm-patch.md)。PIC 测试由主仓库维护。
 
 阻止导入 `relocache` 后，原生 EngineCore、DefaultModelState、Request 与普通请求哈希仍可使用。核心布局、身份与轻量客户端不依赖 vLLM。attention 扩展函数在同一 Triton kernel 内融合执行，不新增 KV 搬运或单独的旋转 kernel。
 
-## 当前累计补丁的验证
+## 当前最小侵入接入验证
 
-当前 fork 相对 `upstream-base` 仅修改 28 个源码文件，增加 410 行、删除 46 行。RoPE 通过 ReLoCache CustomOp 插件接入，存储查询组合原生各层接口；原生 rotary、secondary-tier 基类、filesystem/object-store manager 源码与基线一致。
+相对 `upstream-base`，当前累计修改 **22 个源码文件，+314/-44**。EngineCore 请求结构、InputProcessor、NewRequestData、FileMapper、worker input_batch/model_runner/ModelState interface 均恢复原生实现。新增 OnlineRenderer 类选择；PIC attention metadata 和位置映射位于 ReLoCache。
+
+- `CUDA_VISIBLE_DEVICES=7 .venv/bin/python -m pytest -q`：**63 项通过**，包含 6 项 fused attention 数值/图执行测试，以及请求 slot 重排、dummy batch 的独立位置映射测试。
+- GPU 6–7，Qwen3-0.6B BF16，DP=2/TP=1、LoRA Writer、Pre/Post soft tokens、Reader embeddings、chunk size 64、CUDA graph：显式/自动 Writer、重复引用、两副本状态、Completion/Chat/Responses（含 assistant）、SSE、错误请求与 flush 全部通过。普通输入与结构化 token 输入继续使用原生执行。含启动总耗时 49.01 秒。
+- GPU 7 文件系统生命周期：关闭自动编译时，三个 API 的缓存缺失均为请求级错误；并发生成期间，单个 Writer 持久化等待约 0.558 秒返回，其他请求仍在执行。重启从新配置的 `pre_rope` 子目录加载 8 页，`auto_compiles=0`、Reader 实际 prefill 13 rows，原生 fs→CPU→GPU 统计保留。
+- Ruff、fork 适用 pre-commit hooks、mypy 3.10/3.12、离线 lock 检查通过。未运行对象存储服务或正式 SemPIC 质量评测。测试及说明仅提交到主仓库。
+
+命令与完整产物位于 [运行目录](../runs/pic-minimal-integration-20260918/)，包含配置、代码快照/patch、PID、设备映射和日志。主要入口：
+
+```bash
+CUDA_VISIBLE_DEVICES=7 .venv/bin/python -m pytest -q
+CUDA_VISIBLE_DEVICES=6,7 .venv/bin/python runs/pic-minimal-integration-20260918/verify.py
+CUDA_VISIBLE_DEVICES=7 .venv/bin/python runs/pic-minimal-integration-20260918/lifecycle.py
+```
+
+[HTTP 结果](../runs/pic-minimal-integration-20260918/results.json)和[生命周期结果](../runs/pic-minimal-integration-20260918/lifecycle/results.json)均有完成标记。运行进程已退出，未中断其他任务。
+
+本轮最初一次 pytest 未限定 CUDA 可见设备，不能算作指定 GPU 的验收；其中两个测试仍按旧类继承顺序寻找原生 schema，修改断言对象后通过。最终全套测试在卡 7 完整重跑，后续 GPU 启动均检查并限定为卡 6/7。fork 首次 lint 修正了一处行宽，之后适用检查通过。
+
+### 位置映射的性能取舍
+
+采用外置映射，恢复三个原生 worker 文件。对比使用相同 storage/query/slot 输入，先检查数值一致，再用 CUDA graph 测量位置准备阶段；该测量不包含 Python launch 和服务调度。GPU 7，int64 positions，结果为微秒：
+
+| batch / query rows | 融合准备 | 原生准备 + 外置映射 | 增加 |
+| --- | ---: | ---: | ---: |
+| 1 / 1 | 1.672 | 3.087 | 1.415 |
+| 4 / 1 | 1.888 | 3.458 | 1.571 |
+| 32 / 1 | 2.001 | 3.691 | 1.690 |
+| 4 / 64 | 1.933 | 3.410 | 1.477 |
+| 4 / 256 | 1.969 | 3.510 | 1.540 |
+
+另用同一 Qwen3-0.6B 服务、GPU 7、DP=TP=1，比较 batch=1/4 的 128-token decode 和 chunked prefill。每项 2 次预热、8 次测量；prefill 使用不同 cache salt。下表为整批 HTTP 请求的中位耗时（毫秒），包括调度和传输，并非模型单步 GPU 耗时：
+
+| 工作负载 | 融合 | 外置 | 固定 CPU affinity 后融合 | 固定 CPU affinity 后外置 |
+| --- | ---: | ---: | ---: | ---: |
+| decode，batch=1 | 458.2 | 423.6 | 451.6 | 371.2 |
+| decode，batch=4 | 369.7 | 508.6 | 504.8 | 375.0 |
+| chunked prefill，batch=1 | 103.0 | 68.2 | 100.7 | 66.9 |
+| chunked prefill，batch=4 | 111.2 | 69.4 | 75.2 | 111.4 |
+
+首轮 batch=4 decode 外置较慢，因而补做相同 CPU affinity（56–63、120–127）的对照；差异方向没有保持一致。端到端结果波动较大，不能据此宣称性能提升或完全无损。选择外置实现的已知代价是每步一次小 kernel，隔离测量增加约 1.4–1.7 微秒；收益是直接使用原生 ModelState 生命周期，不修改 storage positions 和 slot mapping 的准备流程。旋转仍融合在 attention 内，不增加 KV materialization。
+
+详细测量条件与原始样本见 `position-bench.json`、`serving-{fused,external}/measurement.json` 和 `serving-{fused,external}-pinned/measurement.json`。这些只比较位置映射接入方式，不作为正式方法性能结果。
+
+## 前轮接入收缩验证（已有记录）
+
+该轮 fork 相对 `upstream-base` 修改 28 个源码文件，增加 410 行、删除 46 行。RoPE 通过 ReLoCache CustomOp 插件接入，存储查询组合原生各层接口；原生 rotary、secondary-tier 基类、filesystem/object-store manager 源码与基线一致。
 
 - 主仓库 CPU 测试 54 项通过，6 项 CUDA kernel 测试跳过；包含标准/Llama 3 RoPE 在普通模式与 Query-only 模式下的数值检查。
 - 原生 Responses utils 测试 40 项通过，保留普通 assistant/tool 转换行为。

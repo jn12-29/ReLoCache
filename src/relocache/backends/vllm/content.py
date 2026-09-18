@@ -8,7 +8,7 @@ from vllm.renderers.embed_utils import safe_load_prompt_embeds
 from relocache.content import ContentError, ContentStore
 
 from .compiler import compile_inputs, compile_prompt, source_signature
-from .transport import encode_input
+from .transport import input_metadata
 
 
 class ContentService:
@@ -22,6 +22,7 @@ class ContentService:
         }
         self.pre_length = len(self.writer_soft_tokens.get("pre", ()))
         self.post_length = len(self.writer_soft_tokens.get("post", ()))
+        self.writer_signature = source_signature({"writer_soft_tokens": self.writer_soft_tokens})
 
     def native_content(self, content):
         return {
@@ -30,6 +31,7 @@ class ContentService:
             "method_id": self.config["method_id"],
             "writer": self.config.get("writer"),
             "writer_soft_tokens": self.writer_soft_tokens,
+            "signature": self.writer_signature,
         }
 
     def public_content(self, content):
@@ -72,7 +74,9 @@ class ContentService:
         _, sampling, lora = compile_inputs(native)
         prompt = compile_prompt(native, self.engine.vllm_config.cache_config.block_size)
         request_id = f"compile:{uuid4().hex}"
-        prompt["extension"] = encode_input([native], compile=True, operation_id=request_id)
+        sampling.extra_args = {
+            "relocache": input_metadata([native], compile=True, operation_id=request_id)
+        }
         persist = payload.get("persist", False)
         try:
             async for output in self.engine.generate(
@@ -106,9 +110,7 @@ class ContentService:
     async def status(self, content_id):
         content = self.store.resolve(content_id)
         native = self.native_content(content)
-        signature = source_signature(native)
         native.pop("writer_soft_tokens")
-        native["signature"] = signature
         inspection_id = "inspect:" + uuid4().hex
         try:
             while True:

@@ -3,6 +3,7 @@
 import time
 from dataclasses import asdict
 
+from vllm.renderers.embed_utils import safe_load_prompt_embeds
 from vllm.utils.hashing import get_hash_fn_by_name
 from vllm.v1.core.sched.async_scheduler import AsyncScheduler
 from vllm.v1.core.sched.scheduler import Scheduler
@@ -15,7 +16,7 @@ from .compiler import prepare_content
 from .coordination import defer_missing_content
 from .request import PICRequest, pic_hasher
 from .storage import finish_inspection, inspect_tiers
-from .transport import decode_input, encode_input
+from .transport import input_metadata
 
 
 class PICSchedulerMixin:
@@ -23,21 +24,28 @@ class PICSchedulerMixin:
         super().__init__(*args, **kwargs)
         self.compiles = CompilationTracker()
         self.compilations = {}
+        self.writer_soft_tokens = {
+            name: safe_load_prompt_embeds(self.vllm_config.model_config, part["data"].encode())
+            for name, part in self.vllm_config.additional_config["relocache"]
+            .get("writer_soft_tokens", {})
+            .items()
+        }
 
     @property
     def offload(self):
         return self.connector.connector_scheduler if self.connector is not None else None
 
     def create_request(self, request, block_hasher):
-        if request.extension is not None:
-            data = decode_input(request.extension)
+        params = request.sampling_params
+        data = (params.extra_args or {}).get("relocache") if params else None
+        if data is not None:
             contents = [
                 prepare_content(
                     c, self.vllm_config.model_config, self.kv_cache_config.kv_cache_groups
                 )
                 for c in data["contents"]
             ]
-            request.extension = encode_input(
+            params.extra_args["relocache"] = input_metadata(
                 contents,
                 data["spans"],
                 compile=data["compile"],
@@ -110,8 +118,16 @@ class PICSchedulerMixin:
         for data in output.scheduled_new_reqs:
             request = self.requests[data.req_id]
             data.prompt_embeds, data.prompt_is_token_ids = pack_prompt_embeds(request)
-            if request.pic_layout is not None:
-                data.worker_metadata = asdict(request.pic_layout)
+            extra = data.sampling_params.extra_args or {}
+            if request.pic_layout is not None or "relocache" in extra:
+                data.sampling_params = data.sampling_params.clone()
+                data.sampling_params.extra_args = {
+                    key: value for key, value in extra.items() if key != "relocache"
+                }
+                if request.pic_layout is not None:
+                    data.sampling_params.extra_args["relocache"] = {
+                        "layout": asdict(request.pic_layout)
+                    }
         for rid, count in output.num_scheduled_tokens.items():
             request = self.requests[rid]
             if request.wait_started is not None:

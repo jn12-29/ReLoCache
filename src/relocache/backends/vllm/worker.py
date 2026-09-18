@@ -8,11 +8,13 @@ from dataclasses import dataclass
 import msgspec
 import numpy as np
 import torch
-from vllm.v1.attention.backends.triton_attn import TritonAttentionMetadata
 from vllm.v1.worker.gpu.buffer_utils import StagedWriteTensor, async_copy_to_gpu
 
 from relocache.kernels.attention import logical_visible_end, map_entries, rotate_keys
 from relocache.layout import PICLayout
+
+from .attention import PICAttentionMetadata
+from .positions import map_positions
 
 
 @dataclass
@@ -92,9 +94,10 @@ class PICModelState:
 
     def add_request(self, req_index, request):
         pointer = 0
-        if request.worker_metadata is not None:
+        metadata = (request.sampling_params.extra_args or {}).get("relocache", {})
+        if "layout" in metadata:
             buffers = PICInputBuffers.from_layout(
-                msgspec.convert(request.worker_metadata, type=PICLayout),
+                msgspec.convert(metadata["layout"], type=PICLayout),
                 request.sampling_params.max_tokens,
                 self.device,
             )
@@ -116,7 +119,7 @@ class PICModelState:
             if req_id in self.requests
         ]
         for layer_name, layer_metadata in metadata.items():
-            if not isinstance(layer_metadata, TritonAttentionMetadata):
+            if not isinstance(layer_metadata, PICAttentionMetadata):
                 continue
             if layer_name not in self.rotary_parameters:
                 attention = model.get_submodule(layer_name.rsplit(".", 1)[0])
@@ -180,9 +183,6 @@ class PICModelStateAdapter(DefaultModelState):
         super().__init__(*args, **kwargs)
         self.pic = PICModelState(self.max_num_reqs, self.max_num_tokens, self.device)
 
-    def get_position_mapping(self):
-        return self.pic.position_map_ptrs.gpu, self.pic.positions
-
     def add_request(self, req_index, request):
         self.pic.add_request(req_index, request)
         super().add_request(req_index, request)
@@ -196,6 +196,19 @@ class PICModelStateAdapter(DefaultModelState):
         super().apply_staged_writes()
 
     def prepare_inputs(self, input_batch, req_states):
+        # DP dummy batches have synthetic IDs and must not dereference request slots.
+        maps = (
+            self.pic.position_map_ptrs.gpu
+            if input_batch.req_ids[0] in req_states.req_id_to_index
+            else None
+        )
+        map_positions(
+            input_batch.positions,
+            self.pic.positions,
+            input_batch.idx_mapping,
+            input_batch.query_start_loc,
+            maps,
+        )
         return {
             **super().prepare_inputs(input_batch, req_states),
             "positions": self.pic.positions[: input_batch.num_tokens_after_padding],
