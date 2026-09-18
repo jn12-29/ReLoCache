@@ -8,7 +8,7 @@ Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_token
 
 当前优先推进 PIC 核心与 vLLM 解耦，沿解耦路径同步补齐输入、缓存生命周期和可观测性等功能。暂不考虑 EPIC、CacheBlend 等重算方法和压缩方法。具体任务与完成标准见 [TODO 与未来计划](docs/roadmap.md)。
 
-第一层已拆分来源目录、内容快照和 Reader 输入组装，vLLM 服务与编译接入集中在 `relocache.backends.vllm`。`/v1/completions` 新增有序 token 内容块，与 Chat/Responses 共用逻辑位置计算；支持仅按已注册 ID 编译。协议与客户端示例见[精确输入说明](docs/integration.md#exact-token-content-blocks)。
+第一层已拆分来源目录、内容快照和 Reader 输入组装，vLLM 服务与编译接入集中在 `relocache.backends.vllm`。`/v1/completions` 新增有序 token 内容块，与 Chat/Responses 共用逻辑位置计算；支持仅按已注册 ID 编译。GPU 6–7 上的 Qwen3-0.6B、DP=2、TP=1 HTTP 验证已通过，范围与缓存状态相关观察见[路线图](docs/roadmap.md)。协议与客户端示例见[精确输入说明](docs/integration.md#exact-token-content-blocks)。
 
 ## 启动
 

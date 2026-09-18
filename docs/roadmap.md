@@ -33,7 +33,9 @@
 
 已完成第一层拆分：来源目录与快照位于 `relocache.content`，Reader 输入组装与位置计算位于 `relocache.inputs`，轻量公共类型位于 `relocache.protocol`；vLLM 服务、渲染、配置和编译请求构造集中在 `relocache.backends.vllm`。fork 通过按需调用接入模块完成编译，普通请求不加载 ReLoCache；PIC 调度、存储布局与 attention 的解耦仍待完成。
 
-验证：26 项[服务与输入测试](../tests/test_service.py)和 27 项 fork PIC CPU 测试通过，包含原生 renderer 对 token IDs、Reader embeddings 和重复引用位置的一致性检查。本轮 GPU HTTP 验证等待 GPU 4–7 空闲，尚未运行。
+验证：26 项[服务与输入测试](../tests/test_service.py)和 27 项 fork PIC CPU 测试通过。GPU 6–7 上的 Qwen3-0.6B BF16、DP=2、TP=1 HTTP 验证已通过，覆盖合成 rank-8 LoRA Writer、Writer/Reader soft tokens、精确 token 输入、按 ID 编译、重复引用、Chat/Responses、流式生成及内容错误；[验证记录](../runs/pic-input-decoupling-20260918/validation.json)与[响应结果](../runs/pic-input-decoupling-20260918/results.json)不构成质量或性能评测。测试进程已退出并释放其 GPU 占用。
+
+相同热缓存状态下，Chat 与 completions 的输出 tokens、logprobs 一致，流式与非流式文本一致；两个 DP 副本的冷缓存结果也一致。同一 completions 请求在冷、热缓存下于第三个输出 token 分歧，热缓存时两个候选分数并列；验证按相同缓存状态比较接口，不将跨缓存状态的逐 token 相等作为完成标准。
 
 ### 输入表示与服务协议
 
