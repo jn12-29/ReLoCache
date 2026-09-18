@@ -2,11 +2,11 @@
 
 ReLoCache 面向基于 PIC 的高效推理服务，负责 PIC 相关语义与核心组件的实现。当前实现基于 `sempic_iclr` Native PIC，接入 vLLM；未来支持多后端。
 
-Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_tokens`，不启用 LoRA 时对应未压缩 KV Packet，配合 `writer_adapter` 时对应 Joint。显式与自动编译共用原生混合输入，保留 Pre/document/Post KV，并按完整长度推进 Reader 位置。配置格式见 [接入说明](docs/integration.md)。GPU 6 上的 Qwen3-0.6B 执行验证已通过，包含合成 rank-8 LoRA、chunked prefill、重复引用和缓存复用；[验证结果](runs/writer-soft-tokens-20260914/results.json)不构成方法质量或性能评测。
+Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_tokens`，不启用 LoRA 时对应 KV Packet，配合 `writer_adapter` 时对应 Joint。显式与自动编译共用原生混合输入，保留 Pre/document/Post KV，并按完整长度推进 Reader 位置。配置格式见 [接入说明](docs/integration.md)。GPU 6 上的 Qwen3-0.6B 执行验证已通过，包含合成 rank-8 LoRA、chunked prefill、重复引用和缓存复用；[验证结果](runs/writer-soft-tokens-20260914/results.json)不构成方法质量或性能评测。
 
 独立环境已安装，服务逻辑已迁移，已修正元数据持久化、KV 持久化检查、connector 配置合并和请求 schema 的迁移偏差。Qwen3-8B P16 demo 已在 GPU 4–7、DP=4、TP=1 下完成六个数据集各一个样本的 Full Prefill/PIC 对比，共 12 次请求全部成功；结果见 [metrics.json](runs/sempic-demo-20260914/metrics.json)。本次验证包含 LoRA Writer 自动编译和 Reader soft tokens，不构成正式质量或性能评测。
 
-后续工作、实施顺序与完成标准见 [TODO 与未来计划](docs/roadmap.md)。
+当前优先推进 PIC 核心与 vLLM 解耦，沿解耦路径同步补齐输入、缓存生命周期和可观测性等功能。暂不考虑 EPIC、CacheBlend 等重算方法和压缩方法。具体任务与完成标准见 [TODO 与未来计划](docs/roadmap.md)。
 
 ## 启动
 
