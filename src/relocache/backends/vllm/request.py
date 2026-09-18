@@ -1,10 +1,8 @@
 """Native request specialization for independently compiled content."""
 
-from dataclasses import asdict
-
 from vllm.v1.request import Request
 
-from .cache import dynamic_content_ranges, hash_reusable_request, pack_prompt_embeds
+from .cache import dynamic_content_ranges, hash_reusable_request
 from .transport import decode_input
 from .types import ReusableSpan
 
@@ -51,12 +49,8 @@ class PICRequest(Request):
             for c in {s.content["compiled_id"]: s.content for s in self.reusable_spans}.values()
         )
 
-    def get_prompt_embeds(self):
-        return pack_prompt_embeds(self)
-
     def install_layout(self):
         self.required_cached_tokens = self.pic_layout.precomputed_length
-        self.worker_metadata = asdict(self.pic_layout)
 
 
 def pic_hasher(native_hasher, block_size, hash_fn):

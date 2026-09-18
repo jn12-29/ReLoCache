@@ -434,7 +434,7 @@ def test_missing_pic_and_terminal_pic_cannot_execute_placeholders(manager):
 def test_mixed_embeddings_follow_storage_order_without_changing_prefix_identity(
     manager,
 ):
-    from vllm.v1.core.sched.output import NewRequestData
+    from relocache.backends.vllm.cache import pack_prompt_embeds
 
     embeds = torch.zeros(16, 3)
     embeds[[2, 8, 9, 12]] = torch.arange(12).reshape(4, 3).float() + 1
@@ -449,11 +449,11 @@ def test_mixed_embeddings_follow_storage_order_without_changing_prefix_identity(
     req = request("reader", tokens, spans, prompt_embeds=embeds, prompt_is_token_ids=mask)
     assert req._pic_dynamic_content_hashes[0] == ordinary.block_hashes[0]
     prepare_reusable_request(req, manager)
-    data = NewRequestData.from_request(req, ([],))
+    packed_embeds, packed_mask = pack_prompt_embeds(req)
     order = [0, 1, 2, 3, None, None, None, None, 4, 8, 9, 12, 13, 14, 15]
     expected = torch.stack([torch.zeros(3) if index is None else embeds[index] for index in order])
-    torch.testing.assert_close(data.prompt_embeds, expected)
-    assert data.prompt_is_token_ids == [True if index is None else mask[index] for index in order]
+    torch.testing.assert_close(packed_embeds, expected)
+    assert packed_mask == [True if index is None else mask[index] for index in order]
     assert all(0 <= token < 99 for token in req.all_token_ids)
     req.append_output_token_ids([20, 21, 22, 23])
     fresh = request("fresh", tokens, spans, prompt_embeds=embeds, prompt_is_token_ids=mask)

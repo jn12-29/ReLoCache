@@ -1,6 +1,7 @@
 """PIC coordination on the native scheduler, allocator and offload lifecycle."""
 
 import time
+from dataclasses import asdict
 
 from vllm.utils.hashing import get_hash_fn_by_name
 from vllm.v1.core.sched.async_scheduler import AsyncScheduler
@@ -9,10 +10,11 @@ from vllm.v1.core.sched.scheduler import Scheduler
 from relocache.compilation import CompilationTracker
 from relocache.layout import reused_token_count
 
-from .cache import prepare_reusable_request
+from .cache import pack_prompt_embeds, prepare_reusable_request
 from .compiler import prepare_content
 from .coordination import defer_missing_content
 from .request import PICRequest, pic_hasher
+from .storage import finish_inspection, inspect_tiers
 from .transport import decode_input, encode_input
 
 
@@ -105,6 +107,11 @@ class PICSchedulerMixin:
         return kv_params, ec_params
 
     def _update_after_schedule(self, output):
+        for data in output.scheduled_new_reqs:
+            request = self.requests[data.req_id]
+            data.prompt_embeds, data.prompt_is_token_ids = pack_prompt_embeds(request)
+            if request.pic_layout is not None:
+                data.worker_metadata = asdict(request.pic_layout)
         for rid, count in output.num_scheduled_tokens.items():
             request = self.requests[rid]
             if request.wait_started is not None:
@@ -116,7 +123,7 @@ class PICSchedulerMixin:
         super()._update_after_schedule(output)
 
     def inspect_content(self, content, request_id):
-        from vllm.v1.kv_offload.base import ReqContext, make_offload_key
+        from vllm.v1.kv_offload.base import make_offload_key
 
         entries = [
             (group_id, h) for group_id, g in enumerate(content["groups"]) for h in g["block_hashes"]
@@ -127,68 +134,66 @@ class PICSchedulerMixin:
         )
         tiers = {}
         if self.offload:
-            tiers = self.offload.manager.inspect_keys(
-                [make_offload_key(h, g) for g, h in entries], ReqContext(request_id)
+            tiers = inspect_tiers(
+                self.offload.manager, [make_offload_key(h, g) for g, h in entries], request_id
             )
         return {"pages": len(entries), "gpu_pages": gpu, "tiers": tiers}
 
-    def extension_call(self, method, *args):
-        rank = self.parallel_config.data_parallel_rank
-        if method in ("forget_compile", "finish_inspection"):
-            from vllm.v1.kv_offload.base import ReqContext
+    def finish_inspection(self, request_id):
+        if self.offload:
+            finish_inspection(self.offload.manager, request_id)
 
-            operation = self.compilations.pop(args[0], None)
-            if self.offload:
-                inspection_id = operation[0] if operation else args[0]
-                self.offload.manager.finish_inspection(ReqContext(inspection_id))
+    def forget_compile(self, operation_id):
+        operation = self.compilations.pop(operation_id, None)
+        if operation is not None:
+            self.finish_inspection(operation[0])
+
+    def compile_status(self, operation_id, persist):
+        operation = self.compilations.get(operation_id)
+        if operation is None:
             return None
-        if method == "compile_status":
-            operation_id, persist = args
-            operation = self.compilations.get(operation_id)
-            if operation is None:
-                return None
-            request_id, content = operation
-            pending = persist and (
-                request_id in self.requests
-                or bool(self.offload and self.offload.has_request_work(request_id))
-            )
-            if pending:
-                return {"rank": rank, "pending": True}
-            state = self.inspect_content(content, request_id) if persist else None
-            if state and any(
-                v in ("RETRY", "HIT_PENDING") for values in state["tiers"].values() for v in values
-            ):
-                return {"rank": rank, "pending": True}
-            durable = (
-                [
-                    values
-                    for name, values in state["tiers"].items()
-                    if name.split(":")[0] in ("fs", "obj")
-                ]
-                if state
-                else []
-            )
-            return {
-                "rank": rank,
-                "pending": False,
-                "compiled": True,
-                "persisted": all(all(v == "HIT" for v in values) for values in durable)
-                if durable
-                else (False if persist else None),
-                "cache": state,
-            }
-        if method == "content_status":
-            payload = args[0]
-            content = prepare_content(
-                payload, self.vllm_config.model_config, self.kv_cache_config.kv_cache_groups
-            )
-            return {
-                "rank": rank,
-                "compiled_id": content["compiled_id"],
-                "compiling": content["compiled_id"] in self.compiles.active,
-                **self.inspect_content(content, args[1]),
-            }
-        raise ValueError(method)
+        rank = self.parallel_config.data_parallel_index
+        request_id, content = operation
+        pending = persist and (
+            request_id in self.requests
+            or bool(self.offload and self.offload.has_request_work(request_id))
+        )
+        if pending:
+            return {"rank": rank, "pending": True}
+        state = self.inspect_content(content, request_id) if persist else None
+        if state and any(
+            v in ("RETRY", "HIT_PENDING") for values in state["tiers"].values() for v in values
+        ):
+            return {"rank": rank, "pending": True}
+        durable = (
+            [
+                values
+                for name, values in state["tiers"].items()
+                if name.split(":")[0] in ("fs", "obj")
+            ]
+            if state
+            else []
+        )
+        return {
+            "rank": rank,
+            "pending": False,
+            "compiled": True,
+            "persisted": all(all(v == "HIT" for v in values) for values in durable)
+            if durable
+            else (False if persist else None),
+            "cache": state,
+        }
+
+    def content_status(self, payload, inspection_id):
+        content = prepare_content(
+            payload, self.vllm_config.model_config, self.kv_cache_config.kv_cache_groups
+        )
+        return {
+            "rank": self.parallel_config.data_parallel_index,
+            "compiled_id": content["compiled_id"],
+            "compiling": content["compiled_id"] in self.compiles.active,
+            **self.inspect_content(content, inspection_id),
+        }
 
 
 class PICScheduler(PICSchedulerMixin, Scheduler):

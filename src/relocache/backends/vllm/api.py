@@ -18,7 +18,7 @@ from .protocol import (
     ReusableCompletionRequest,
     ReusableResponsesRequest,
 )
-from .rendering import render_reusable_chat, render_reusable_completion
+from .rendering import convert_response_input, render_reusable_chat, render_reusable_completion
 
 router = APIRouter()
 
@@ -107,6 +107,7 @@ class ReLoCacheEndpoints:
     async def init_state(self, engine_client, state, args):
         config = engine_client.vllm_config.additional_config["relocache"]
         state.relocache = ContentService(engine_client, config)
+        state.online_renderer.response_input_converter = convert_response_input
         state.online_renderer.chat_input_renderer = partial(
             render_reusable_chat,
             service=state.relocache,

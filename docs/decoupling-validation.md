@@ -4,11 +4,35 @@
 
 ## 实现边界
 
-PIC 内容与 Writer 身份、编译协调、逻辑位置和 fused-RoPE 实现属于 ReLoCache；页哈希、请求/调度子类、IPC、worker buffers 属于 `backends.vllm`。fork 删除原 `core/pic.py`、`worker/gpu/pic.py` 及 PIC 测试，保留通用执行接口和原生 KV 管理、offload、attention 主循环。PIC 测试迁入主仓库。
+PIC 内容与 Writer 身份、编译协调、逻辑位置和 fused-RoPE 实现属于 ReLoCache；页哈希、请求/调度子类、IPC、worker buffers 属于 `backends.vllm`。相对 `upstream-base`，fork 保留必要的执行接口和原生 KV 管理、offload、attention 主循环；完整累计差异见 [vLLM 修改边界](vllm-patch.md)。PIC 测试由主仓库维护。
 
 阻止导入 `relocache` 后，原生 EngineCore、DefaultModelState、Request 与普通请求哈希仍可使用。核心布局、身份与轻量客户端不依赖 vLLM。attention 扩展函数在同一 Triton kernel 内融合执行，不新增 KV 搬运或单独的旋转 kernel。
 
-## 已执行验证
+## 当前累计补丁的验证
+
+当前 fork 相对 `upstream-base` 共 31 个修改文件（28 个源码、2 个测试、1 个说明），增加 468 行、删除 47 行。RoPE 通过 ReLoCache CustomOp 插件接入，存储查询组合原生各层接口；原生 rotary、secondary-tier 基类、filesystem/object-store manager 源码与基线一致。
+
+- 主仓库 CPU 测试 54 项通过，6 项 CUDA kernel 测试跳过；包含标准/Llama 3 RoPE 在普通模式与 Query-only 模式下的数值检查。
+- 原生 Responses utils 测试 40 项通过，保留普通 assistant/tool 转换行为。
+- GPU 6–7、Qwen3-0.6B BF16、DP=2/TP=1 服务验证通过，沿用下面的 LoRA、soft-token、chunked-prefill 和 CUDA Graph 配置。两个副本状态分别返回 rank 0、1；另覆盖 assistant 历史中的内容引用和 embeddings。含启动总耗时约 28.07 秒。
+- GPU 7 文件系统生命周期验证通过：独立持久化约 0.299 秒返回，其他生成仍在执行；重启后原生加载 8 页，`auto_compiles=0`，Reader 实际执行 13 个 prefill rows。
+- Ruff、fork 适用 pre-commit hooks、mypy 3.10/3.12 和离线 lock 检查通过。没有重跑未改变的 attention 数学测试与原生调度/offload 全套；其已有验证列于下文。
+
+当前验证命令与产物：
+
+```bash
+CUDA_VISIBLE_DEVICES='' uv run --no-sync pytest -q
+CUDA_VISIBLE_DEVICES='' uv run --no-sync pytest -q --noconftest \
+  third_party/vllm/tests/entrypoints/openai/responses/test_responses_utils.py
+CUDA_VISIBLE_DEVICES=6,7 uv run --no-sync python runs/pic-fork-reduction-20260918/verify.py
+CUDA_VISIBLE_DEVICES=7 uv run --no-sync python runs/pic-fork-reduction-20260918/lifecycle.py
+```
+
+配置、代码 patch、PID、GPU 映射、日志及响应保存在 [运行目录](../runs/pic-fork-reduction-20260918/)。[HTTP 结果](../runs/pic-fork-reduction-20260918/results.json)与[生命周期结果](../runs/pic-fork-reduction-20260918/lifecycle/results.json)均有完成标记。
+
+HTTP 重试记录分别保留在 `attempt-1-scheduler-signature`、`attempt-2-dp-index`、`attempt-3-request-schema`：调度输出处理改用已有回调；状态标识修正为不会被 dense 模型重置的 `data_parallel_index`；测试请求补齐 `output_text.annotations`。最后一项只修改验证脚本。Responses 单元测试目录的 conftest 依赖未安装的 `pytest_asyncio`；该纯单元测试文件不依赖目录 fixtures，使用 `--noconftest` 运行，未新增依赖。
+
+## 基础执行验证（已有记录）
 
 | 范围 | 结果 |
 | --- | --- |

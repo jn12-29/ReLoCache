@@ -85,9 +85,9 @@ class ContentService:
             metrics = output.kv_transfer_params["relocache"]
             while True:
                 results = await self.engine.engine_core.call_utility_async(
-                    "extension_call", "compile_status", [request_id, persist]
+                    "scheduler_call", "compile_status", [request_id, persist], all_results=True
                 )
-                states = [r for r in (results if isinstance(results, list) else [results]) if r]
+                states = [r for r in results if r]
                 state = states[0]
                 if not state["pending"]:
                     break
@@ -100,7 +100,7 @@ class ContentService:
             return {**self.public_content(content), "compilation": state, "metrics": metrics}
         finally:
             await self.engine.engine_core.call_utility_async(
-                "extension_call", "forget_compile", [request_id]
+                "scheduler_call", "forget_compile", [request_id], all_results=True
             )
 
     async def status(self, content_id):
@@ -112,10 +112,9 @@ class ContentService:
         inspection_id = "inspect:" + uuid4().hex
         try:
             while True:
-                result = await self.engine.engine_core.call_utility_async(
-                    "extension_call", "content_status", [native, inspection_id]
+                replicas = await self.engine.engine_core.call_utility_async(
+                    "scheduler_call", "content_status", [native, inspection_id], all_results=True
                 )
-                replicas = result if isinstance(result, list) else [result]
                 if not any(
                     v in ("RETRY", "HIT_PENDING")
                     for r in replicas
@@ -126,7 +125,7 @@ class ContentService:
                 await asyncio.sleep(0.05)
         finally:
             await self.engine.engine_core.call_utility_async(
-                "extension_call", "finish_inspection", [inspection_id]
+                "scheduler_call", "finish_inspection", [inspection_id], all_results=True
             )
 
     def deployment(self):
@@ -147,5 +146,9 @@ class ContentService:
 
     async def flush(self):
         """Drain all native DP engines, including pending connector writes."""
-        while await self.engine.engine_core.call_utility_async("storage_pending"):
+        while any(
+            await self.engine.engine_core.call_utility_async(
+                "scheduler_call", "has_requests", [], all_results=True
+            )
+        ):
             await asyncio.sleep(0.1)

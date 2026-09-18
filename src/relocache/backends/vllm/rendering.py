@@ -11,7 +11,12 @@ from vllm.renderers.hf import _build_mixed_prompt_embeds
 from relocache.content import ContentError
 from relocache.inputs import assemble_input
 
+from .protocol import response_message_kind
 from .transport import encode_input
+
+
+def convert_response_input(item):
+    return item if response_message_kind(item) == "reusable" else None
 
 
 def has_reusable_content(messages):

@@ -3,6 +3,7 @@
 
 """Logical attention coordinates stay independent of native storage order."""
 
+import pytest
 import torch
 
 from relocache.backends.vllm.worker import PICInputBuffers
@@ -93,7 +94,11 @@ def test_pic_segments_trim_layer_padding_and_offset_fractional_entries():
     assert buffers.positions[[8, 9, 10, 11]].tolist() == [0, 3, 4, 5]
 
 
-def test_resident_frequencies_match_standard_and_llama3_rotary_outputs():
+@pytest.mark.parametrize("position_free", [False, True])
+def test_resident_frequencies_match_standard_and_llama3_rotary_outputs(position_free):
+    from relocache.backends.vllm import register
+
+    register()
     from vllm.config import VllmConfig, set_current_vllm_config
     from vllm.model_executor.layers.rotary_embedding.base import RotaryEmbedding
     from vllm.model_executor.layers.rotary_embedding.llama3_rope import (
@@ -108,7 +113,7 @@ def test_resident_frequencies_match_standard_and_llama3_rotary_outputs():
         "is_neox_style": True,
         "dtype": torch.float32,
     }
-    with set_current_vllm_config(VllmConfig()):
+    with set_current_vllm_config(VllmConfig(additional_config={"position_free_kv": position_free})):
         modules = [
             RotaryEmbedding(**options),
             Llama3RotaryEmbedding(
@@ -122,9 +127,10 @@ def test_resident_frequencies_match_standard_and_llama3_rotary_outputs():
     positions = torch.tensor([0, 3, 17])
     query = torch.arange(24, dtype=torch.float32).reshape(3, 8) / 24
     for rotary in modules:
-        actual, _ = rotary.forward_native(positions, query.clone(), query.clone())
+        actual, keys = rotary(positions, query.clone(), query.clone())
         phase = positions.float()[:, None] * rotary.inv_freq
         cos, sin = phase.cos(), phase.sin()
         first, second = query.chunk(2, dim=-1)
         expected = torch.cat((first * cos - second * sin, second * cos + first * sin), dim=-1)
         torch.testing.assert_close(actual, expected * rotary.attention_scaling)
+        torch.testing.assert_close(keys, query if position_free else expected)

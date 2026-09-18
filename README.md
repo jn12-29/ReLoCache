@@ -24,7 +24,7 @@ uv run --no-sync relocache serve \
   --port 8000
 ```
 
-该配置来自已导出的 Qwen3-8B P16 demo，包含模型、Writer LoRA 路径和 vLLM 参数。CLI 加载 ReLoCache endpoint plugin，并通过 vLLM 原生 `ServeSubcommand` 启动服务。参数说明可用 `uv run --no-sync relocache serve --help` 查看。
+该配置来自已导出的 Qwen3-8B P16 demo，包含模型、Writer LoRA 路径和 vLLM 参数。CLI 加载 ReLoCache endpoint 和 CustomOp plugins，并通过 vLLM 原生 `ServeSubcommand` 启动服务。参数说明可用 `uv run --no-sync relocache serve --help` 查看。
 
 启动完成后检查：
 
@@ -47,7 +47,7 @@ curl http://127.0.0.1:8000/v1/models
 
 允许 vLLM fork 依赖并调用 ReLoCache。优先使用现有插件和扩展点，将后端细节留在接入模块；必要的 vLLM 修改以可提交上游的窄接口或执行能力为目标，保留原生功能与性能。避免包安装循环依赖，不要求上游 vLLM 强制安装 ReLoCache。
 
-当前仅接入 vLLM。PIC 组件及其测试归 ReLoCache，fork 保留通用执行扩展；具体模块与接口见 [docs/integration.md](docs/integration.md)。
+当前仅接入 vLLM。PIC 组件及其测试归 ReLoCache，fork 保留通用执行扩展；具体模块与接口见 [docs/integration.md](docs/integration.md)，相对原始 vLLM 的累计修改见 [docs/vllm-patch.md](docs/vllm-patch.md)。
 
 ## 仓库
 

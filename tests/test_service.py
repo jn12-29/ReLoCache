@@ -34,18 +34,20 @@ class Engine:
         self.requests = []
         self.request_ids = []
 
-    async def call_utility_async(self, method, *args):
-        if method == "storage_pending":
-            return self.pending.pop(0) if self.pending else False
+    async def call_utility_async(self, method, *args, all_results=False):
+        if args[0] == "has_requests":
+            return [self.pending.pop(0) if self.pending else False]
         if args[0] == "forget_compile":
             return None
         assert args[0] == "compile_status"
         assert args[1][0] in self.request_ids
-        return {
-            "pending": self.pending.pop(0) if self.pending else False,
-            "compiled": True,
-            "persisted": args[1][1],
-        }
+        return [
+            {
+                "pending": self.pending.pop(0) if self.pending else False,
+                "compiled": True,
+                "persisted": args[1][1],
+            }
+        ]
 
     async def generate(self, prompt, sampling, request_id, **kwargs):
         self.requests.append((prompt, sampling, kwargs))
@@ -111,7 +113,12 @@ def test_responses_preserve_structured_parts_in_assistant_history():
         },
     ]
     request = ReusableResponsesRequest(model="reader", input=messages)
-    assert construct_input_messages(request_input=request.input) == request.input
+    from relocache.backends.vllm.rendering import convert_response_input
+
+    assert (
+        construct_input_messages(request_input=request.input, item_converter=convert_response_input)
+        == request.input
+    )
     assert request.model_dump(mode="json")["input"] == messages
 
 

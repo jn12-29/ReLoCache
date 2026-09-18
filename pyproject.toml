@@ -16,6 +16,9 @@ relocache = "relocache.cli:main"
 [project.entry-points."vllm.endpoint_plugins"]
 relocache = "relocache.backends.vllm.api:ReLoCacheEndpoints"
 
+[project.entry-points."vllm.general_plugins"]
+relocache = "relocache.backends.vllm:register"
+
 [build-system]
 requires = ["setuptools>=77,<81"]
 build-backend = "setuptools.build_meta"
