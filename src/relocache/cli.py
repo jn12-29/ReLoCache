@@ -36,7 +36,7 @@ def main():
     from vllm.entrypoints.launchers.cli_args import make_arg_parser, validate_parsed_serve_args
     from vllm.utils.argparse_utils import FlexibleArgumentParser
 
-    from .config import engine_options
+    from .backends.vllm.config import engine_options
 
     config = json.loads(Path(args.config).read_text())
     options = engine_options(config)

@@ -8,7 +8,7 @@
 
 - 已有内容注册、显式/自动编译、Reader 引用、flush 和配置持久化 KV 层后的落盘能力。
 - 已有 Base/LoRA Writer、Writer Pre/Post soft tokens 和独立的 Reader embeddings，支持 KV Packet / Joint 编译与引用。
-- PIC 公开生成接口使用 Chat/Responses 的结构化内容引用；普通 completions 支持完整 token IDs，但尚无精确 token 内容块的公开 PIC 输入。
+- PIC 生成支持 Chat/Responses 结构化引用和 completions 的有序 token 内容块，两条路径共用 Reader 逻辑输入表示。
 - `sempic_open` 当前只接入 teacher generation 与 `full_recompute`。已有 GPU 执行验证见 [README](../README.md)，不代表方法接入或正式质量、性能评测已经完成。
 
 ## 职责与实施约束
@@ -31,15 +31,19 @@
 
 完成标准：相关 PIC 组件与 vLLM 接入职责分离，对应路径的功能缺口同步补齐；保留已有执行、缓存与服务语义，并验证相关路径的正确性和实际效率。
 
+已完成第一层拆分：来源目录与快照位于 `relocache.content`，Reader 输入组装与位置计算位于 `relocache.inputs`，轻量公共类型位于 `relocache.protocol`；vLLM 服务、渲染、配置和编译请求构造集中在 `relocache.backends.vllm`。fork 通过按需调用接入模块完成编译，普通请求不加载 ReLoCache；PIC 调度、存储布局与 attention 的解耦仍待完成。
+
+验证：26 项[服务与输入测试](../tests/test_service.py)和 27 项 fork PIC CPU 测试通过，包含原生 renderer 对 token IDs、Reader embeddings 和重复引用位置的一致性检查。本轮 GPU HTTP 验证等待 GPU 4–7 空闲，尚未运行。
+
 ### 输入表示与服务协议
 
 在拆分内容表示与渲染接入时，让调用方保留已准备好的 token 序列与内容边界。
 
-- [ ] 增加有序 token 内容块输入，组合 Dynamic Content（普通 token IDs 与 Reader embeddings）和 Reusable Content 引用，原样执行调用方提供的 tokens。
-- [ ] 由服务端根据块顺序计算位置和 spans，按 Writer 包装后的完整逻辑长度推进 Reader 位置；客户端无需重复提交另一套位置描述。
-- [ ] 将 token 输入与 Chat/Responses 渲染结果归一到共同的内部表示，保留普通消息服务的输入方式。
-- [ ] 提供不依赖 vLLM 安装的轻量客户端类型，覆盖新增输入及内容编译结果。
-- [ ] 统一内容相关错误的对外表达，包括未知内容、空来源和不满足持久化条件。
+- [x] 增加有序 token 内容块输入，组合 Dynamic Content（普通 token IDs 与 Reader embeddings）和 Reusable Content 引用，原样执行调用方提供的 tokens。
+- [x] 由服务端根据块顺序计算位置和 spans，按 Writer 包装后的完整逻辑长度推进 Reader 位置；客户端无需重复提交另一套位置描述。
+- [x] 将 token 输入与 Chat/Responses 渲染结果归一到共同的内部表示，保留普通消息服务的输入方式。
+- [x] 提供不依赖 vLLM 安装的轻量客户端类型，覆盖新增输入及内容编译结果。
+- [x] 统一内容相关错误的对外表达，包括未知内容、空来源和不满足持久化条件。
 
 完成标准：精确 token 输入、包装位置和生成结果满足各自契约；客户端类型不依赖 vLLM。
 
@@ -47,8 +51,8 @@
 
 在拆分编译协调与存储接入时，补齐离线编译和持续在线服务所需的生命周期语义。
 
-- [ ] 支持按已注册内容 ID 显式编译，避免再次传输来源。
-- [ ] 明确同一 ID 更新来源时，已提交请求与后续引用各自绑定的内容语义。
+- [x] 支持按已注册内容 ID 显式编译，避免再次传输来源。
+- [x] 明确同一 ID 更新来源时，已提交请求与后续引用各自绑定的内容语义：引用解析时绑定不可变来源快照，同一请求按块顺序解析；更新仅影响后续解析。
 - [ ] 将本次编译和持久化的完成等待限定到其产生的工作，保留全局 `flush` 用于整体排空。
 - [ ] 明确关闭自动编译后的 cache miss 行为，并对外返回可识别的失败原因；原生加载中的 KV 不作为编译缺失处理。
 - [ ] 分别表达来源注册、编译完成、当前 KV 驻留与持久化结果，避免用长期有效的 `ready` 标志代替动态缓存状态。

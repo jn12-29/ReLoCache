@@ -5,6 +5,8 @@ from time import perf_counter
 
 import httpx
 
+from .protocol import ContentBlock, ContentInfo
+
 
 class Client:
     def __init__(self, api_base, *, timeout=None):
@@ -24,14 +26,18 @@ class Client:
         result["http_latency_seconds"] = perf_counter() - started
         return result
 
-    async def register(self, content_id, *, input_ids=None, text=None):
+    async def register(self, content_id, *, input_ids=None, text=None) -> ContentInfo:
         source = {"text": text} if input_ids is None else {"input_ids": input_ids}
         return await self.post(
             "/v1/reusable_contents/register", {"content_id": content_id, **source}
         )
 
-    async def compile(self, content_id, *, input_ids=None, text=None, persist=False):
-        source = {"text": text} if input_ids is None else {"input_ids": input_ids}
+    async def compile(self, content_id, *, input_ids=None, text=None, persist=False) -> ContentInfo:
+        source = {}
+        if input_ids is not None:
+            source["input_ids"] = input_ids
+        if text is not None:
+            source["text"] = text
         return await self.post(
             "/v1/reusable_contents/compile",
             {
@@ -43,6 +49,9 @@ class Client:
 
     async def flush(self):
         return await self.post("/v1/reusable_contents/flush", {})
+
+    async def complete(self, blocks: list[ContentBlock], **generation):
+        return await self.post("/v1/completions", {**generation, "prompt": {"blocks": blocks}})
 
 
 async def completed_requests(request, items, concurrency):

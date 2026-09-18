@@ -14,7 +14,7 @@ demo = ["peft>=0.20.0", "safetensors>=0.8.0", "rouge-score>=0.1.2"]
 relocache = "relocache.cli:main"
 
 [project.entry-points."vllm.endpoint_plugins"]
-relocache = "relocache.api:ReLoCacheEndpoints"
+relocache = "relocache.backends.vllm.api:ReLoCacheEndpoints"
 
 [build-system]
 requires = ["setuptools>=77,<81"]

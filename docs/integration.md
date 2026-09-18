@@ -13,7 +13,7 @@ PIC names the reusable cache mechanism; pre-RoPE KV describes the storage repres
 
 SemPIC exports a deployment description containing model/tokenizer identity, Writer identity, a standard PEFT adapter when used, and compilation settings. ReLoCache must not depend on SemPIC checkpoint layout or import `sempic`.
 
-Full Prefill uses `/v1/completions` for text or token IDs, or `/v1/chat/completions` for messages. PIC uses structured reusable-content references and, when requested by the method, prompt embeddings through the Chat/Responses APIs. ReLoCache resolves references and renders them for native execution. Both paths retain native generation-parameter handling, streaming, and response semantics.
+Full Prefill uses `/v1/completions` for text or token IDs, or `/v1/chat/completions` for messages. PIC accepts ordered token content blocks through `/v1/completions`, or structured reusable-content references and prompt embeddings through Chat/Responses. ReLoCache resolves both input paths into the same logical Reader representation before native execution. Generation retains native sampling, streaming, and response handling.
 
 For training and evaluation, SemPIC chooses the task prompt, chat template, content boundaries, and soft-token placement. ReLoCache executes the supplied rendering instructions; it does not choose them from dataset or method names. Content registration accepts text or token IDs. Token IDs remain useful for research-controlled inputs without becoming the required public generation format.
 
@@ -60,7 +60,9 @@ The architecture targets multiple backends; only vLLM is implemented today. Keep
 
 Inference backends call ReLoCache components through plugins or extension points, minimizing changes to backend source code. The vLLM fork may depend on and call ReLoCache; avoid package installation cycles and keep ReLoCache optional for upstream vLLM. Reuse native KV allocation, reference counting, scheduling, cache lookup, and offload mechanisms. Necessary vLLM changes should be narrow interfaces or execution capabilities that can be understood and proposed upstream independently. Preserve native structure, functionality, and performance; reduce private implementation coupling rather than copying native logic to reduce the patch's file count.
 
-This is the target boundary. The current fork still implements PIC page identity, execution metadata transport, compilation coordination, physical/logical placement, pre-RoPE KV, and fused-RoPE attention. The current priority is to decouple PIC core components from vLLM through extension interfaces, completing the required input, lifecycle, and observability functionality along the same paths. Recompute methods such as EPIC and CacheBlend, and compression methods, are deferred. See the [roadmap](roadmap.md) for tasks and completion criteria. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
+The first extraction separates the source catalog and immutable snapshots (`relocache.content`), logical Reader input assembly (`relocache.inputs`), and lightweight public types (`relocache.protocol`) from vLLM. Native serving schemas, rendering, configuration, compilation requests, and page identity are in `relocache.backends.vllm`. The fork calls the compilation integration only on PIC paths; ordinary vLLM serving does not require ReLoCache.
+
+The fork still implements execution metadata transport, scheduling coordination, physical/logical storage placement, pre-RoPE KV, and fused-RoPE attention. The current priority is to decouple these PIC components through extension interfaces, completing required lifecycle and observability functionality along the same paths. Recompute methods such as EPIC and CacheBlend, and compression methods, are deferred. See the [roadmap](roadmap.md) for tasks and completion criteria. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
 
 Registration stores source tokens and Writer identity without an engine RPC. Reader input carries a content table and occurrence indices; the engine derives native page metadata before request hashing. Explicit compilation receives page padding and its final observation row in native input processing, before prompt-length validation. Workers receive only unique position mappings, occurrence placements, and physical segments. Identity mappings use contiguous ranges without entry-position tensors; explicit per-layer mappings share tensors across repeated occurrences.
 
@@ -80,11 +82,60 @@ Datasets, artifact conversion, reference answers, scoring, and aggregation stay 
 
 Content metadata stays in memory by default. Optional `metadata_dir` stores JSON source records by Writer identity and content alias, allowing references to be resolved after restart. KV pages remain owned by vLLM; metadata records do not imply KV residency or persistence.
 
+Registration requires `content_id` and exactly one of `input_ids` or `text`. Compilation accepts the same source fields, or only `content_id` to compile an existing registration. Each resolved occurrence binds an immutable source snapshot. Updating an ID affects subsequent resolutions, including later blocks within the same request; already resolved occurrences retain their source. Reference blocks are resolved in input order.
+
+Content errors use an `error` object containing `message`, `type`, and `code`: unknown IDs return HTTP 404 with `unknown_content`; empty sources return HTTP 400 with `invalid_content`; unavailable persistent KV storage returns HTTP 400 with `persistence_unavailable`. Request schema errors retain native validation handling.
+
 `compile` with `persist=true` requires an `OffloadingConnector` using `TieringOffloadingSpec` with a filesystem (`fs`) or object-store (`obj`) secondary tier. It waits for all native DP engines to drain requests and connector writes. `flush` drains native work without asserting that a persistent tier is configured.
 
 Deployment `engine.kv_transfer_config` retains its connector settings, with `key_encoding=pre_rope` applied to the cache namespace. Optional `cpu_bytes_to_use` overrides the staging budget; `kv_dir` appends a filesystem tier and requires a staging budget supplied either there or in the native connector configuration.
 
 Chat and Responses retain native request types for ordinary inputs. Messages containing `reusable_content` use typed text, content-reference, and prompt-embedding parts. Responses also accepts prompt-embedding messages alongside content references. Responses preprocessing preserves assistant content lists only when they contain reusable references or prompt embeddings; other input items follow native conversion.
+
+### Exact token content blocks
+
+`POST /v1/completions` accepts a single structured `prompt`:
+
+```json
+{
+  "model": "reader",
+  "prompt": {
+    "blocks": [
+      {"type": "tokens", "input_ids": [101, 102]},
+      {"type": "reusable_content", "id": "document"},
+      {"type": "prompt_embeds", "data": "<base64 torch.save tensor>"},
+      {"type": "tokens", "input_ids": [103]}
+    ]
+  },
+  "max_tokens": 32,
+  "temperature": 0
+}
+```
+
+Token IDs execute in the supplied order without decoding, re-tokenization, or inserted special tokens. Reader embedding rows occupy ordinary Dynamic Content positions. Each content reference advances by the Writer's full Pre/document/Post length; clients supply no spans or offsets. Repeated references may share native KV pages while retaining distinct logical positions. References may include `text` or `input_ids` to register their source inline.
+
+Structured prompts reject `truncate_prompt_tokens`, top-level `prompt_embeds`, `echo`, and `prompt_logprobs`. The Reader input must end with Dynamic Content because terminal PIC observation is not implemented. Chat truncation may remove whole occurrences but cannot split reusable content. Ordinary completion prompts retain native behavior.
+
+`relocache.protocol` exports `TokenPart`, `PromptEmbedsPart`, `ReusableContentPart`, `ContentBlock`, `BlockPrompt`, and `ContentInfo` without vLLM, Torch, or Pydantic imports. The asynchronous client uses the same wire format:
+
+```python
+from relocache.client import Client
+
+async with Client("http://127.0.0.1:8000") as client:
+    await client.register("document", input_ids=[201, 202])
+    compiled = await client.compile("document")
+    response = await client.complete(
+        [
+            {"type": "tokens", "input_ids": [101]},
+            {"type": "reusable_content", "id": "document"},
+            {"type": "tokens", "input_ids": [103]},
+        ],
+        model="reader",
+        max_tokens=32,
+    )
+```
+
+`Client.complete` consumes a non-streaming JSON response. HTTP callers can use native `stream=true`; a client streaming helper remains planned.
 
 Dependency version differences do not need to be reverted. HTTP connection policy and GPU/CPU cache budgets are deployment or measurement settings; record the actual settings when interpreting timings instead of treating historical values as method requirements.
 
