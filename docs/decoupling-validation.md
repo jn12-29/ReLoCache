@@ -10,7 +10,7 @@ PIC 内容与 Writer 身份、编译协调、逻辑位置和 fused-RoPE 实现�
 
 ## 当前累计补丁的验证
 
-当前 fork 相对 `upstream-base` 共 31 个修改文件（28 个源码、2 个测试、1 个说明），增加 468 行、删除 47 行。RoPE 通过 ReLoCache CustomOp 插件接入，存储查询组合原生各层接口；原生 rotary、secondary-tier 基类、filesystem/object-store manager 源码与基线一致。
+当前 fork 相对 `upstream-base` 仅修改 28 个源码文件，增加 410 行、删除 46 行。RoPE 通过 ReLoCache CustomOp 插件接入，存储查询组合原生各层接口；原生 rotary、secondary-tier 基类、filesystem/object-store manager 源码与基线一致。
 
 - 主仓库 CPU 测试 54 项通过，6 项 CUDA kernel 测试跳过；包含标准/Llama 3 RoPE 在普通模式与 Query-only 模式下的数值检查。
 - 原生 Responses utils 测试 40 项通过，保留普通 assistant/tool 转换行为。
@@ -31,6 +31,16 @@ CUDA_VISIBLE_DEVICES=7 uv run --no-sync python runs/pic-fork-reduction-20260918/
 配置、代码 patch、PID、GPU 映射、日志及响应保存在 [运行目录](../runs/pic-fork-reduction-20260918/)。[HTTP 结果](../runs/pic-fork-reduction-20260918/results.json)与[生命周期结果](../runs/pic-fork-reduction-20260918/lifecycle/results.json)均有完成标记。
 
 HTTP 重试记录分别保留在 `attempt-1-scheduler-signature`、`attempt-2-dp-index`、`attempt-3-request-schema`：调度输出处理改用已有回调；状态标识修正为不会被 dense 模型重置的 `data_parallel_index`；测试请求补齐 `output_text.annotations`。最后一项只修改验证脚本。Responses 单元测试目录的 conftest 依赖未安装的 `pytest_asyncio`；该纯单元测试文件不依赖目录 fixtures，使用 `--noconftest` 运行，未新增依赖。
+
+## 测试归属
+
+Fork 中新增的共享 mmap unlink、必需缓存 promotion 等待测试现位于主仓库 `tests/test_vllm_offload.py`；两项迁移后的测试均通过：
+
+```bash
+CUDA_VISIBLE_DEVICES='' uv run --no-sync pytest -q tests/test_vllm_offload.py
+```
+
+Fork 的测试和说明文件与 `upstream-base` 一致。此次仅调整测试与文档归属，运行源码未变，未重复执行 GPU 验证。
 
 ## 基础执行验证（已有记录）
 

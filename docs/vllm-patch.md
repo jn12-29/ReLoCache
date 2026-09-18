@@ -6,7 +6,7 @@
 git -C third_party/vllm diff upstream-base HEAD
 ```
 
-当前累计差异为 31 个文件：28 个源码、2 个测试、1 个说明；增加 468 行、删除 47 行。
+当前累计差异仅包含 28 个源码文件，增加 410 行、删除 46 行。相关回归测试和说明统一放在 ReLoCache 主仓库的 `tests/`、`docs/` 中；fork 的测试和文档与 `upstream-base` 保持一致。
 
 PIC 服务仍依赖该 fork。ReLoCache 使用原生 endpoint/general plugins、CustomOp 注册、Scheduler 子类和调度输出处理；没有复制原生调度器、KV 管理器或模型执行主循环。
 
