@@ -2,6 +2,13 @@
 
 This document records the integration boundary after reviewing the initial extraction. The Qwen3-8B P16 demo completed six Full Prefill/PIC sample pairs on GPUs 4–7 with DP=4 and TP=1; results are in `runs/sempic-demo-20260914`. This covers on-demand LoRA Writer compilation and Reader soft tokens. The default abort shutdown logged an `EngineDeadError` after all responses and flush completed; all test GPU allocations were released.
 
+## Content terminology
+
+- **Reusable Content** is independently compiled by the Writer into PIC KV and referenced by the Reader at different logical positions. The API uses `reusable_content` references.
+- **Dynamic Content** is executed in the current Reader context, including ordinary tokens and Reader-side embeddings. Its KV can be reused through native prefix caching under the corresponding context dependencies. Code identifiers use `dynamic_content`.
+
+PIC names the reusable cache mechanism; pre-RoPE KV describes the storage representation. These are distinct from the two content categories.
+
 ## SemPIC to ReLoCache
 
 SemPIC exports a deployment description containing model/tokenizer identity, Writer identity, a standard PEFT adapter when used, and compilation settings. ReLoCache must not depend on SemPIC checkpoint layout or import `sempic`.
@@ -28,7 +35,7 @@ The current ICLR implementation inserts Pre/Post embeddings into Reader input ar
 
 Writer compilation accepts deployment `writer_soft_tokens` with optional `pre` and `post` entries, using the same `{ "data": "<base64 torch.save tensor>" }` representation as Reader prompt embeddings. ReLoCache loads these tensors once in the model's dtype and enables native prompt embeddings. Tensor row counts determine the lengths; a separate `count` is unnecessary. Omit `writer_adapter` for a base Writer (KV Packet), or supply a standard PEFT adapter for Joint. The service does not select methods by name.
 
-Explicit and automatic compilation both execute `[Pre, document, Post, page padding, observation]` through native mixed token/embedding input. All Pre/document/Post KV rows are retained, with contiguous local positions starting at zero; padding and the observation row are excluded from Reader attention. Each reusable occurrence occupies `pre_length + document_length + post_length` Reader positions, so subsequent Inline and decode positions advance by that full extent. Reader-side soft tokens remain separate ordinary inputs and are not implicitly inserted from the Writer configuration. This implements the uncompressed packet path; KV selection and reduction are outside this extension.
+Explicit and automatic compilation both execute `[Pre, document, Post, page padding, observation]` through native mixed token/embedding input. All Pre/document/Post KV rows are retained, with contiguous local positions starting at zero; padding and the observation row are excluded from Reader attention. Each reusable occurrence occupies `pre_length + document_length + post_length` Reader positions, so subsequent Dynamic Content and decode positions advance by that full extent. Reader-side soft tokens remain separate ordinary inputs and are not implicitly inserted from the Writer configuration. This implements the uncompressed packet path; KV selection and reduction are outside this extension.
 
 Native page identity includes Writer soft-token values, shapes, dtypes, and Pre/Post placement, in addition to method identity and document tokens. Reusable descriptors carry typed tensors through native vLLM IPC; only compilation requests build full mixed embeddings. Workers consuming cached contents still receive compact continuous layouts. Registration and metadata persistence retain source document tokens; restoring a source binds it to the current deployment's Writer and soft tokens.
 
@@ -63,7 +70,7 @@ ReLoCache owns content registration and optional metadata persistence. vLLM owns
 
 ## Evaluation input semantics
 
-ICLR constructs canonical inputs by independently tokenizing Inline and Content blocks and concatenating their IDs. Its Teacher performs full causal recomputation on those IDs; its Student uses the same hard IDs with optional Reader soft tokens. This is an explicit training and evaluation convention, not a requirement of ordinary Full Prefill serving. See the read-only source's `src/sempic/data.py`, `src/sempic/evaluation/server.py`, and `docs/overview/Training_Design.md`.
+ICLR constructs canonical inputs by independently tokenizing Dynamic Content and Reusable Content blocks and concatenating their IDs. Its Teacher performs full causal recomputation on those IDs; its Student uses the same hard IDs with optional Reader soft tokens. This is an explicit training and evaluation convention, not a requirement of ordinary Full Prefill serving. See the read-only source's `src/sempic/data.py`, `src/sempic/evaluation/server.py`, and `docs/overview/Training_Design.md`.
 
 The service demo expands the source documents into ordinary messages for Full Prefill and references those same documents for PIC, using the same task text, template, and generation settings. Evaluation compares quality and performance without requiring identical token IDs. Whole-prompt and segmented tokenization are the respective paths' normal behavior; their difference does not require alignment or correction. Canonical token alignment is a training requirement.
 

@@ -27,7 +27,7 @@
 
 ### ReLoCache TODO
 
-- [ ] 增加有序 token 内容块输入，组合普通 token IDs、可复用内容引用与 Reader embeddings，原样执行调用方提供的 tokens。
+- [ ] 增加有序 token 内容块输入，组合 Dynamic Content（普通 token IDs 与 Reader embeddings）和 Reusable Content 引用，原样执行调用方提供的 tokens。
 - [ ] 由服务端根据块顺序计算位置和 spans，按 Writer 包装后的完整逻辑长度推进 Reader 位置；客户端无需重复提交另一套位置描述。
 - [ ] 将 token 输入与 Chat/Responses 渲染结果归一到共同的内部表示，保留普通消息服务的输入方式。
 - [ ] 提供不依赖 vLLM 安装的轻量客户端类型，覆盖新增输入及内容编译结果。

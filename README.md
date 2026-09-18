@@ -37,6 +37,8 @@ curl http://127.0.0.1:8000/v1/models
 
 ## 职责
 
+内容统一分为 **Reusable Content** 和 **Dynamic Content**：前者由 Writer 独立编译为 PIC，供 Reader 跨位置引用；后者随当前上下文执行，也可通过原生前缀缓存复用。输入可按顺序组合两类内容，例如 `[Dynamic Content: 指令] [Reusable Content: 文档] [Dynamic Content: 问题]`。
+
 - **SemPIC**：主要负责训练和评测语义，包括训练产物导出、评测输入与评分。
 - **ReLoCache**：PIC 核心组件与高效服务，包括缓存编译、内容复用、相关推理实现及后端接入。
 - **推理后端**：提供原生执行基础，通过插件或扩展点调用 ReLoCache 的组件，尽量减少源码修改，复用原生能力并保持性能。
