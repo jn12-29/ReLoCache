@@ -6,9 +6,9 @@ Writer 编译支持 Pre/Post soft tokens：部署配置加入 `writer_soft_token
 
 独立环境已安装，服务逻辑已迁移，已修正元数据持久化、KV 持久化检查、connector 配置合并和请求 schema 的迁移偏差。Qwen3-8B P16 demo 已在 GPU 4–7、DP=4、TP=1 下完成六个数据集各一个样本的 Full Prefill/PIC 对比，共 12 次请求全部成功；结果见 [metrics.json](runs/sempic-demo-20260914/metrics.json)。本次验证包含 LoRA Writer 自动编译和 Reader soft tokens，不构成正式质量或性能评测。
 
-当前优先推进 PIC 核心与 vLLM 解耦，沿解耦路径同步补齐输入、缓存生命周期和可观测性等功能。暂不考虑 EPIC、CacheBlend 等重算方法和压缩方法。具体任务与完成标准见 [TODO 与未来计划](docs/roadmap.md)。
+PIC 核心与 vLLM 的当前拆分已完成。内容与 Writer 身份、编译协调、位置映射和 fused-RoPE 实现位于 ReLoCache；原生页管理、调度、offload 和 attention 主循环通过窄接口接入。输入、缓存生命周期与可观测性功能已同步补齐，见 [接入说明](docs/integration.md)和 [TODO 与未来计划](docs/roadmap.md)。EPIC、CacheBlend 等重算方法和压缩方法仍暂缓，后续规划保留。
 
-第一层已拆分来源目录、内容快照和 Reader 输入组装，vLLM 服务与编译接入集中在 `relocache.backends.vllm`。`/v1/completions` 新增有序 token 内容块，与 Chat/Responses 共用逻辑位置计算；支持仅按已注册 ID 编译。GPU 6–7 上的 Qwen3-0.6B、DP=2、TP=1 HTTP 验证已通过，范围与缓存状态相关观察见[路线图](docs/roadmap.md)。协议与客户端示例见[精确输入说明](docs/integration.md#exact-token-content-blocks)。
+GPU 6–7 的 Qwen3-0.6B、DP=2、TP=1 验证覆盖 LoRA Writer、Writer/Reader soft tokens、精确 token 输入、Chat/Responses、流式客户端与请求统计。文件系统 KV 验证覆盖请求级 cache miss、并发生成期间独立完成持久化，以及重启后的原生加载。验证范围和指标见 [拆分验证记录](docs/decoupling-validation.md)。
 
 ## 启动
 
@@ -47,7 +47,7 @@ curl http://127.0.0.1:8000/v1/models
 
 允许 vLLM fork 依赖并调用 ReLoCache。优先使用现有插件和扩展点，将后端细节留在接入模块；必要的 vLLM 修改以可提交上游的窄接口或执行能力为目标，保留原生功能与性能。避免包安装循环依赖，不要求上游 vLLM 强制安装 ReLoCache。
 
-这是目标边界。当前仅接入 vLLM，PIC 调度、位置映射和 fused-RoPE 等实现仍在 fork 中，尚未按此边界完成收敛。具体接入约定见 [docs/integration.md](docs/integration.md)。
+当前仅接入 vLLM。PIC 组件及其测试归 ReLoCache，fork 保留通用执行扩展；具体模块与接口见 [docs/integration.md](docs/integration.md)。
 
 ## 仓库
 

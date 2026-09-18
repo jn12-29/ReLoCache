@@ -25,17 +25,15 @@
 
 优先推进 PIC 核心与 vLLM 解耦，下述输入、生命周期与可观测性任务随对应组件的解耦一起完成。
 
-- [ ] 将 PIC 内容与 Writer 身份、编译协调、逻辑位置映射和 PIC attention 等语义与核心实现收敛到 ReLoCache。
-- [ ] 将 vLLM block hashes、页布局、调度消息和 attention metadata 等细节集中到接入模块，通过插件或扩展点调用 PIC 核心组件。
-- [ ] 必要的 vLLM 修改形成可独立解释的窄接口或执行能力，复用原生 KV 分配、引用计数、调度、查找和 offload，减少对私有实现的直接耦合。
+- [x] 将 PIC 内容与 Writer 身份、编译协调、逻辑位置映射和 PIC attention 等语义与核心实现收敛到 ReLoCache。
+- [x] 将 vLLM block hashes、页布局、调度消息和 attention metadata 等细节集中到接入模块，通过插件或扩展点调用 PIC 核心组件。
+- [x] 必要的 vLLM 修改形成可独立解释的窄接口或执行能力，复用原生 KV 分配、引用计数、调度、查找和 offload，减少对私有实现的直接耦合。
 
 完成标准：相关 PIC 组件与 vLLM 接入职责分离，对应路径的功能缺口同步补齐；保留已有执行、缓存与服务语义，并验证相关路径的正确性和实际效率。
 
-已完成第一层拆分：来源目录与快照位于 `relocache.content`，Reader 输入组装与位置计算位于 `relocache.inputs`，轻量公共类型位于 `relocache.protocol`；vLLM 服务、渲染、配置和编译请求构造集中在 `relocache.backends.vllm`。fork 通过按需调用接入模块完成编译，普通请求不加载 ReLoCache；PIC 调度、存储布局与 attention 的解耦仍待完成。
+当前拆分已完成：`content` / `inputs` / `identity` / `compilation` / `layout` 和 `kernels.attention` 保存 PIC 核心；`backends.vllm` 保存请求、页哈希、缓存布局接入、调度子类、IPC 和 worker 接入。fork 不再包含 PIC 实现或导入 ReLoCache，保留通用执行接口与原生 attention 主循环。
 
-验证：26 项[服务与输入测试](../tests/test_service.py)和 27 项 fork PIC CPU 测试通过。GPU 6–7 上的 Qwen3-0.6B BF16、DP=2、TP=1 HTTP 验证已通过，覆盖合成 rank-8 LoRA Writer、Writer/Reader soft tokens、精确 token 输入、按 ID 编译、重复引用、Chat/Responses、流式生成及内容错误；[验证记录](../runs/pic-input-decoupling-20260918/validation.json)与[响应结果](../runs/pic-input-decoupling-20260918/results.json)不构成质量或性能评测。测试进程已退出并释放其 GPU 占用。
-
-相同热缓存状态下，Chat 与 completions 的输出 tokens、logprobs 一致，流式与非流式文本一致；两个 DP 副本的冷缓存结果也一致。同一 completions 请求在冷、热缓存下于第三个输出 token 分歧，热缓存时两个候选分数并列；验证按相同缓存状态比较接口，不将跨缓存状态的逐 token 相等作为完成标准。
+输入、生命周期及可观测性任务均已随拆分完成。验证范围、执行结果和已知数值观察见 [拆分验证记录](decoupling-validation.md)。
 
 ### 输入表示与服务协议
 
@@ -55,9 +53,9 @@
 
 - [x] 支持按已注册内容 ID 显式编译，避免再次传输来源。
 - [x] 明确同一 ID 更新来源时，已提交请求与后续引用各自绑定的内容语义：引用解析时绑定不可变来源快照，同一请求按块顺序解析；更新仅影响后续解析。
-- [ ] 将本次编译和持久化的完成等待限定到其产生的工作，保留全局 `flush` 用于整体排空。
-- [ ] 明确关闭自动编译后的 cache miss 行为，并对外返回可识别的失败原因；原生加载中的 KV 不作为编译缺失处理。
-- [ ] 分别表达来源注册、编译完成、当前 KV 驻留与持久化结果，避免用长期有效的 `ready` 标志代替动态缓存状态。
+- [x] 将本次编译和持久化的完成等待限定到其产生的工作，保留全局 `flush` 用于整体排空。
+- [x] 明确关闭自动编译后的 cache miss 行为，并对外返回可识别的失败原因；原生加载中的 KV 不作为编译缺失处理。
+- [x] 分别表达来源注册、编译完成、当前 KV 驻留与持久化结果，避免用长期有效的 `ready` 标志代替动态缓存状态。
 
 完成标准：在持续有其他请求的情况下，本次编译仍能独立报告完成；注册、编译、驻留、持久化与缺失的语义分别明确。
 
@@ -65,12 +63,12 @@
 
 随编译、加载和 Reader 执行路径的解耦补齐统计，支持解释缓存收益的实验。
 
-- [ ] 暴露 PIC 引用量与实际复用 KV tokens/pages，区分逻辑引用量和实际执行量。
-- [ ] 记录自动编译数量、缓存加载来源与加载量，以及 Reader 等待编译或加载的时间。
-- [ ] 记录 Reader 实际执行的 prefill token 数，复用原生 TTFT、排队、生成与 tracing 能力。
-- [ ] 定义指标的范围和单位；编译、加载与调度可能重叠，不将其简单相加解释为总延时。
-- [ ] 提供部署摘要查询，包含模型与 Writer 身份、soft-token 长度、自动编译及存储配置，供客户端选择请求和记录实验配置。
-- [ ] 按调用需求补齐客户端流式消费，沿用服务端原生 streaming 与请求取消生命周期。
+- [x] 暴露 PIC 引用量与实际复用 KV tokens/pages，区分逻辑引用量和实际执行量。
+- [x] 记录自动编译数量、缓存加载来源与加载量，以及 Reader 等待编译或加载的时间。
+- [x] 记录 Reader 实际执行的 prefill token 数，复用原生 TTFT、排队、生成与 tracing 能力。
+- [x] 定义指标的范围和单位；编译、加载与调度可能重叠，不将其简单相加解释为总延时。
+- [x] 提供部署摘要查询，包含模型与 Writer 身份、soft-token 长度、自动编译及存储配置，供客户端选择请求和记录实验配置。
+- [x] 按调用需求补齐客户端流式消费，沿用服务端原生 streaming 与请求取消生命周期。
 
 完成标准：请求统计能够区分缓存复用、加载与自动编译。SemPIC 分别记录 SSD 冷缓存、热缓存或稳态实验的初始状态、reset 范围及指标口径。
 

@@ -14,13 +14,31 @@ from vllm.v1.kv_cache_interface import KVCacheGroupSpec
 from vllm.v1.utils import tensor_data
 
 from relocache.content import wrapped_token_ids
+from relocache.identity import compiled_identity, fingerprint
+
+
+def source_signature(content):
+    soft = content.get("writer_soft_tokens", {})
+    return {
+        "pre_length": len(soft.get("pre", ())),
+        "post_length": len(soft.get("post", ())),
+        "soft_hash": fingerprint(
+            tuple(
+                (name, str(tensor.dtype), tuple(tensor.shape), bytes(tensor_data(tensor)))
+                for name, tensor in sorted(soft.items())
+            )
+        ),
+    }
 
 
 def content_token_ids(content, *, placeholder=0):
-    soft = content.get("writer_soft_tokens", {})
-    pre = len(soft["pre"]) if "pre" in soft else 0
-    post = len(soft["post"]) if "post" in soft else 0
-    return wrapped_token_ids(content["input_ids"], pre, post, placeholder=placeholder)
+    signature = content.get("signature") or source_signature(content)
+    return wrapped_token_ids(
+        content["input_ids"],
+        signature["pre_length"],
+        signature["post_length"],
+        placeholder=placeholder,
+    )
 
 
 def build_reusable_metadata(
@@ -36,14 +54,10 @@ def build_reusable_metadata(
         block_size,
     )
     metadata = dict(metadata)
-    soft_identity = tuple(
-        (name, str(tensor.dtype), tuple(tensor.shape), bytes(tensor_data(tensor)))
-        for name, tensor in sorted(metadata.get("writer_soft_tokens", {}).items())
+    soft_hash = metadata["signature"]["soft_hash"]
+    metadata["compiled_id"] = compiled_identity(
+        metadata["method_id"], metadata["input_ids"], soft_hash
     )
-    soft_hash = sha256(soft_identity)
-    metadata["compiled_id"] = sha256(
-        (metadata["method_id"], metadata["input_ids"], soft_hash)
-    ).hex()
     # Restart the causal prefix at the PIC boundary, in the Writer namespace.
     parent_hash = sha256(
         (
@@ -80,7 +94,7 @@ def build_reusable_metadata(
     return metadata
 
 
-def compile_inputs(content, *, internal=False):
+def compile_inputs(content):
     writer = content["writer"]
     return (
         content["input_ids"],
@@ -88,7 +102,6 @@ def compile_inputs(content, *, internal=False):
             max_tokens=1,
             temperature=0,
             detokenize=False,
-            extra_args={"pic_compile": content, "pic_internal": internal},
         ),
         LoRARequest(**writer) if writer is not None else None,
     )
@@ -127,6 +140,7 @@ def prepare_content(payload, model, groups):
         "method_id": payload["method_id"],
         "writer": payload["writer"],
         "writer_soft_tokens": payload.get("writer_soft_tokens", {}),
+        "signature": payload.get("signature") or source_signature(payload),
         "layers": {
             str(index): {
                 "entry_positions": None,

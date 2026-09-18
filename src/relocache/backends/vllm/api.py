@@ -46,14 +46,23 @@ async def register_content(payload: ContentInput, request: Request):
 @router.post("/v1/reusable_contents/compile")
 async def compile_content(payload: CompileInput, request: Request):
     service = request.app.state.relocache
-    content = await service.compile(payload.model_dump(exclude_none=True))
-    return service.public_content(content)
+    return await service.compile(payload.model_dump(exclude_none=True))
 
 
 @router.get("/v1/reusable_contents/{content_id}")
 async def get_content(content_id: str, request: Request):
     service = request.app.state.relocache
     return service.public_content(await service.resolve({"id": content_id}))
+
+
+@router.get("/v1/reusable_contents/{content_id}/status")
+async def content_status(content_id: str, request: Request):
+    return await request.app.state.relocache.status(content_id)
+
+
+@router.get("/v1/relocache")
+async def deployment(request: Request):
+    return request.app.state.relocache.deployment()
 
 
 @router.post("/v1/reusable_contents/flush")

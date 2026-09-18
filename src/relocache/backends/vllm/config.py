@@ -18,6 +18,11 @@ def engine_options(config):
         enable_per_request_metrics=True,
         disable_log_stats=False,
     )
+    options["scheduler_cls"] = (
+        "relocache.backends.vllm.scheduler.PICScheduler"
+        if options.get("async_scheduling") is False
+        else "relocache.backends.vllm.scheduler.PICAsyncScheduler"
+    )
     options.setdefault("api_server_count", 1)
     if config.get("writer_soft_tokens"):
         options["enable_prompt_embeds"] = True
@@ -43,8 +48,9 @@ def engine_options(config):
     options["additional_config"] = {
         **options.get("additional_config", {}),
         "position_free_kv": True,
-        "pic": {"auto_compile": config.get("auto_compile", True)},
+        "model_state_cls": "relocache.backends.vllm.worker.PICModelStateAdapter",
         "relocache": {
+            "auto_compile": config.get("auto_compile", True),
             "method_id": config["method_id"],
             "writer": writer,
             "writer_soft_tokens": config.get("writer_soft_tokens", {}),

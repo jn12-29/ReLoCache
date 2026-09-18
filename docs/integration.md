@@ -60,15 +60,51 @@ The architecture targets multiple backends; only vLLM is implemented today. Keep
 
 Inference backends call ReLoCache components through plugins or extension points, minimizing changes to backend source code. The vLLM fork may depend on and call ReLoCache; avoid package installation cycles and keep ReLoCache optional for upstream vLLM. Reuse native KV allocation, reference counting, scheduling, cache lookup, and offload mechanisms. Necessary vLLM changes should be narrow interfaces or execution capabilities that can be understood and proposed upstream independently. Preserve native structure, functionality, and performance; reduce private implementation coupling rather than copying native logic to reduce the patch's file count.
 
-The first extraction separates the source catalog and immutable snapshots (`relocache.content`), logical Reader input assembly (`relocache.inputs`), and lightweight public types (`relocache.protocol`) from vLLM. Native serving schemas, rendering, configuration, compilation requests, and page identity are in `relocache.backends.vllm`. The fork calls the compilation integration only on PIC paths; ordinary vLLM serving does not require ReLoCache.
+PIC implementation now lives in ReLoCache:
 
-The fork still implements execution metadata transport, scheduling coordination, physical/logical storage placement, pre-RoPE KV, and fused-RoPE attention. The current priority is to decouple these PIC components through extension interfaces, completing required lifecycle and observability functionality along the same paths. Recompute methods such as EPIC and CacheBlend, and compression methods, are deferred. See the [roadmap](roadmap.md) for tasks and completion criteria. Pending native loads are not compilation misses. Automatic Writer requests remain on the Reader's DP engine.
+| Module | Responsibility |
+| --- | --- |
+| `content`, `inputs`, `identity` | Immutable sources, ordered Reader input, Writer/content identity. |
+| `compilation`, `layout` | Shared compilation tracking, miss policy, logical intervals and shared storage coordinates. |
+| `kernels.attention` | PIC range traversal and pre-RoPE key rotation, fused into the native attention kernel. |
+| `backends.vllm.compiler`, `cache`, `request`, `scheduler` | Native page hashes, physical page ordering, Request/Scheduler specializations and compile/load coordination. |
+| `backends.vllm.transport`, `worker` | Typed tensor IPC, worker buffers, native ModelState specialization and attention metadata. |
+| `backends.vllm.api`, `rendering`, `content`, `config` | Serving integration and deployment configuration. |
 
-Registration stores source tokens and Writer identity without an engine RPC. Reader input carries a content table and occurrence indices; the engine derives native page metadata before request hashing. Explicit compilation receives page padding and its final observation row in native input processing, before prompt-length validation. Workers receive only unique position mappings, occurrence placements, and physical segments. Identity mappings use contiguous ranges without entry-position tensors; explicit per-layer mappings share tensors across repeated occurrences.
+The fork contains no PIC implementation or ReLoCache imports. It retains generic request metadata/tensor transport, request construction and cache-admission hooks, configurable ModelState, storage-to-logical positions, query-only RoPE, fused attention transforms, request-scoped offload inspection, and native error/stream metadata propagation. Native KV ownership, scheduling, offload and attention tiling/softmax remain in vLLM. Ordinary vLLM installation does not require ReLoCache.
+
+Registration stores source tokens without an engine RPC. Reader input carries a content table and occurrence indices through opaque metadata plus typed tensor transport. The scheduler adapter derives native page metadata before hashing. The service constructs explicit compilation padding and the observation row before native prompt validation; automatic Writer requests use the same constructor on the Reader's DP engine. Workers receive unique layouts and shared physical segments, with no source tensors for cached contents. Pending native loads are not compilation misses.
+
+Recompute methods such as EPIC and CacheBlend, and compression methods, remain deferred; the [roadmap](roadmap.md) retains their future plans.
 
 Scientific Writer tensor exports remain analysis artifacts; the current serving path compiles and persists native vLLM pages.
 
 ReLoCache owns content registration and optional metadata persistence. vLLM owns KV residency and connector writes. Registering metadata is not evidence that KV has been compiled or persisted. A persistence request must require a configured persistent KV tier and wait for native writes to finish. Ordinary in-memory serving must not require a metadata database.
+
+## Compilation, residency and metrics
+
+Registration/get responses expose `source_registered`, source `input_ids` and wrapped `logical_length`. Compilation additionally returns `compilation` (`compiled`, DP `rank`, `pending`, `persisted`, optional cache snapshot) and execution `metrics`. `persisted=null` means persistence was not requested; `true` records the successful check at completion, not a permanent residency guarantee. Failed persistence returns `persistence_failed`.
+
+`GET /v1/reusable_contents/{content_id}/status` / `Client.status` inspects the current source snapshot on every DP replica. Each entry reports `compiled_id`, `compiling`, total pages, GPU-resident pages and per-tier `HIT`/`MISS` arrays. Inspection waits for asynchronous existence lookups and releases their bookkeeping; it does not promote KV or compile content. A registered source can have no resident KV. Compilation completion and current residency are separate observations.
+
+With `auto_compile=false`, a confirmed missing page terminates only the Reader request through native `finish_reason=error`; HTTP errors retain `reusable_cache_miss` in their message. Asynchronous native promotions wait normally. `reusable_compilation_failed` identifies a dependent Writer failure. Neither failure permits placeholder tokens to execute as ordinary inputs.
+
+`GET /v1/relocache` / `Client.deployment` reports model, Writer, Pre/Post lengths, automatic compilation, block size, TP/DP sizes and storage configuration.
+
+PIC request metrics use the existing `kv_transfer_params.relocache` response field in completions, Chat and Responses. Completion/Chat streaming includes this metadata on the final usage chunk (`stream_options.include_usage=true`). Explicit compile responses include the same metrics directly.
+
+| Metric | Scope and unit |
+| --- | --- |
+| `referenced_tokens`, `occurrences` | Logical wrapped PIC token references and occurrences, including repeated references. |
+| `reused_tokens`, `reused_pages` | Distinct valid PIC storage rows and native pages consumed by this Reader; padding and duplicate references do not add valid rows. Pages are counted at the shared full-attention group geometry. |
+| `auto_compiles` | Writer requests initiated by this Reader; waiting for another Reader's Writer does not increment it. |
+| `wait_seconds` | Reader elapsed time from deferred PIC admission to execution, including compilation, lookup/load and intervening admission delay. |
+| `prefill_tokens_executed` | Actually scheduled prefill rows, including repeated prefill after preemption. Writer rows include padding and observation; Reader rows exclude reused pages. |
+| `compile_seconds` | Explicit Writer request elapsed time within the native scheduler, excluding later persistence waiting. |
+| `loads.cpu_load_jobs`, `cpu_loaded_pages`, `cpu_load_seconds` | Completed CPU→GPU transfer jobs, pages and summed job durations for the request. |
+| `loads.<tier>:<index>` | Secondary→CPU `load_jobs`, successful `loaded_pages` and summed `load_seconds`; includes `fs:0` for the first filesystem tier. |
+
+Load counts cover the request's native transfers, which can include Dynamic Content pages. A page loaded from filesystem through CPU appears in both transfer stages. Work may overlap; do not sum compilation, admission waiting and transfer durations into end-to-end latency. Native timing metrics, TTFT, queueing and tracing remain available. SemPIC records initial cache state and reset scope when comparing runs.
 
 ## Evaluation input semantics
 
@@ -86,7 +122,7 @@ Registration requires `content_id` and exactly one of `input_ids` or `text`. Com
 
 Content errors use an `error` object containing `message`, `type`, and `code`: unknown IDs return HTTP 404 with `unknown_content`; empty sources return HTTP 400 with `invalid_content`; unavailable persistent KV storage returns HTTP 400 with `persistence_unavailable`. Request schema errors retain native validation handling.
 
-`compile` with `persist=true` requires an `OffloadingConnector` using `TieringOffloadingSpec` with a filesystem (`fs`) or object-store (`obj`) secondary tier. It waits for all native DP engines to drain requests and connector writes. `flush` drains native work without asserting that a persistent tier is configured.
+`compile` with `persist=true` requires an `OffloadingConnector` using `TieringOffloadingSpec` with a filesystem (`fs`) or object-store (`obj`) secondary tier. It waits only for that compilation and its native GPU→CPU→persistent-tier writes, then checks presence in each configured persistent tier. Concurrent requests can continue. `flush` remains a global drain across DP replicas and does not assert that a persistent tier is configured.
 
 Deployment `engine.kv_transfer_config` retains its connector settings, with `key_encoding=pre_rope` applied to the cache namespace. Optional `cpu_bytes_to_use` overrides the staging budget; `kv_dir` appends a filesystem tier and requires a staging budget supplied either there or in the native connector configuration.
 
@@ -135,7 +171,7 @@ async with Client("http://127.0.0.1:8000") as client:
     )
 ```
 
-`Client.complete` consumes a non-streaming JSON response. HTTP callers can use native `stream=true`; a client streaming helper remains planned.
+`Client.complete` consumes a non-streaming JSON response. `Client.complete_stream(blocks, **generation)` yields native SSE JSON events, includes the final usage chunk by default, and closes the HTTP stream when its iterator is closed. Use `contextlib.aclosing` when breaking out early. Native request cancellation remains responsible for aborting execution.
 
 Dependency version differences do not need to be reverted. HTTP connection policy and GPU/CPU cache budgets are deployment or measurement settings; record the actual settings when interpreting timings instead of treating historical values as method requirements.
 

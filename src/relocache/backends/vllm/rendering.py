@@ -7,10 +7,11 @@ from uuid import uuid4
 
 from vllm.renderers.embed_utils import safe_load_prompt_embeds_async
 from vllm.renderers.hf import _build_mixed_prompt_embeds
-from vllm.v1.core.pic import ReusableInput
 
 from relocache.content import ContentError
 from relocache.inputs import assemble_input
+
+from .transport import encode_input
 
 
 def has_reusable_content(messages):
@@ -93,7 +94,7 @@ async def render_reader_input(
         [prompt], tok_params, prompt_extras=prompt_extras, skip_mm_cache=skip_mm_cache
     )
     if spans:
-        engine_input["reusable_input"] = ReusableInput(
+        engine_input["extension"] = encode_input(
             [service.native_content(content) for content in prepared.contents], spans
         )
     return engine_input

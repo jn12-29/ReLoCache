@@ -3,12 +3,12 @@
 import asyncio
 from uuid import uuid4
 
-from vllm.inputs import tokens_input
 from vllm.renderers.embed_utils import safe_load_prompt_embeds
 
 from relocache.content import ContentError, ContentStore
 
-from .compiler import compile_inputs
+from .compiler import compile_inputs, compile_prompt, source_signature
+from .transport import encode_input
 
 
 class ContentService:
@@ -37,6 +37,7 @@ class ContentService:
             "content_id": content.content_id,
             "input_ids": list(content.input_ids),
             "logical_length": self.pre_length + len(content.input_ids) + self.post_length,
+            "source_registered": True,
         }
 
     async def register(self, payload):
@@ -67,16 +68,84 @@ class ContentService:
                     code="persistence_unavailable",
                 )
         content = await self.resolve({**payload, "id": payload["content_id"]})
-        ids, sampling, lora = compile_inputs(self.native_content(content))
-        async for _ in self.engine.generate(
-            tokens_input(ids), sampling, f"compile:{uuid4().hex}", lora_request=lora
-        ):
-            pass
-        if payload.get("persist", False):
-            await self.flush()
-        return content
+        native = self.native_content(content)
+        _, sampling, lora = compile_inputs(native)
+        prompt = compile_prompt(native, self.engine.vllm_config.cache_config.block_size)
+        request_id = f"compile:{uuid4().hex}"
+        prompt["extension"] = encode_input([native], compile=True, operation_id=request_id)
+        persist = payload.get("persist", False)
+        try:
+            async for output in self.engine.generate(
+                prompt, sampling, request_id, lora_request=lora
+            ):
+                if output.outputs and output.outputs[0].finish_reason == "error":
+                    raise ContentError(
+                        str(output.outputs[0].stop_reason), code="compilation_failed"
+                    )
+            metrics = output.kv_transfer_params["relocache"]
+            while True:
+                results = await self.engine.engine_core.call_utility_async(
+                    "extension_call", "compile_status", [request_id, persist]
+                )
+                states = [r for r in (results if isinstance(results, list) else [results]) if r]
+                state = states[0]
+                if not state["pending"]:
+                    break
+                await asyncio.sleep(0.05)
+            if persist and not state["persisted"]:
+                raise ContentError(
+                    "Compiled KV is absent from the configured persistent tiers",
+                    code="persistence_failed",
+                )
+            return {**self.public_content(content), "compilation": state, "metrics": metrics}
+        finally:
+            await self.engine.engine_core.call_utility_async(
+                "extension_call", "forget_compile", [request_id]
+            )
+
+    async def status(self, content_id):
+        content = self.store.resolve(content_id)
+        native = self.native_content(content)
+        signature = source_signature(native)
+        native.pop("writer_soft_tokens")
+        native["signature"] = signature
+        inspection_id = "inspect:" + uuid4().hex
+        try:
+            while True:
+                result = await self.engine.engine_core.call_utility_async(
+                    "extension_call", "content_status", [native, inspection_id]
+                )
+                replicas = result if isinstance(result, list) else [result]
+                if not any(
+                    v in ("RETRY", "HIT_PENDING")
+                    for r in replicas
+                    for values in r["tiers"].values()
+                    for v in values
+                ):
+                    return {**self.public_content(content), "replicas": replicas}
+                await asyncio.sleep(0.05)
+        finally:
+            await self.engine.engine_core.call_utility_async(
+                "extension_call", "finish_inspection", [inspection_id]
+            )
+
+    def deployment(self):
+        config = self.engine.vllm_config
+        transfer = config.kv_transfer_config
+        return {
+            "model": config.model_config.model,
+            "method_id": self.config["method_id"],
+            "writer": self.config.get("writer"),
+            "writer_pre_tokens": self.pre_length,
+            "writer_post_tokens": self.post_length,
+            "auto_compile": self.config["auto_compile"],
+            "block_size": config.cache_config.block_size,
+            "data_parallel_size": config.parallel_config.data_parallel_size,
+            "tensor_parallel_size": config.parallel_config.tensor_parallel_size,
+            "storage": transfer.kv_connector_extra_config if transfer else None,
+        }
 
     async def flush(self):
         """Drain all native DP engines, including pending connector writes."""
-        while await self.engine.engine_core.call_utility_async("reusable_storage_pending"):
+        while await self.engine.engine_core.call_utility_async("storage_pending"):
             await asyncio.sleep(0.1)

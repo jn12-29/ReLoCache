@@ -27,17 +27,31 @@ class Engine:
 
     def __init__(self):
         self.engine_core = self
-        self.vllm_config = SimpleNamespace(kv_transfer_config=None)
+        self.vllm_config = SimpleNamespace(
+            kv_transfer_config=None, cache_config=SimpleNamespace(block_size=16)
+        )
         self.pending = []
         self.requests = []
+        self.request_ids = []
 
     async def call_utility_async(self, method, *args):
-        assert method == "reusable_storage_pending"
-        return self.pending.pop(0) if self.pending else False
+        if method == "storage_pending":
+            return self.pending.pop(0) if self.pending else False
+        if args[0] == "forget_compile":
+            return None
+        assert args[0] == "compile_status"
+        assert args[1][0] in self.request_ids
+        return {
+            "pending": self.pending.pop(0) if self.pending else False,
+            "compiled": True,
+            "persisted": args[1][1],
+        }
 
     async def generate(self, prompt, sampling, request_id, **kwargs):
         self.requests.append((prompt, sampling, kwargs))
+        self.request_ids.append(request_id)
         yield SimpleNamespace(
+            kv_transfer_params={"relocache": {"compile_request_id": request_id + "-native"}},
             metrics=None,
             num_cached_tokens=0,
             outputs=[
@@ -164,12 +178,15 @@ def test_http_compilation_uses_writer_lora_and_requires_persistent_kv(storage, w
             )
             result = await client.compile("doc", input_ids=[21, 22])
             assert result["logical_length"] == (4 if writer_soft else 2)
-            prompt, sampling, kwargs = engine.requests[0]
+            prompt, _sampling, kwargs = engine.requests[0]
             assert kwargs["lora_request"].lora_name == "writer"
-            assert prompt["prompt_token_ids"] == [21, 22]
-            assert sampling.extra_args["pic_compile"]["input_ids"] == [21, 22]
+            assert prompt["prompt_token_ids"][:2] == [21, 22]
+            from relocache.backends.vllm.transport import decode_input
+
+            source = decode_input(prompt["extension"])["contents"][0]
+            assert source["input_ids"] == [21, 22]
             if writer_soft:
-                tensor = sampling.extra_args["pic_compile"]["writer_soft_tokens"]["post"]
+                tensor = source["writer_soft_tokens"]["post"]
                 torch.testing.assert_close(tensor, torch.full((2, 4), 0.5))
             if storage == "fs":
                 engine.pending = [True, False]
@@ -353,8 +370,10 @@ def test_compile_registered_id_and_content_errors_through_http():
             compiled = await client.post(
                 "/v1/reusable_contents/compile", json={"content_id": "doc"}
             )
-            assert compiled.status_code == 200 and compiled.json() == registered.json()
-            assert engine.requests[0][0]["prompt_token_ids"] == [21, 22]
+            assert compiled.status_code == 200
+            assert compiled.json()["compilation"]["compiled"]
+            assert compiled.json()["input_ids"] == registered.json()["input_ids"]
+            assert engine.requests[0][0]["prompt_token_ids"] == [21, 22] + [0] * 15
             missing = await client.post(
                 "/v1/reusable_contents/compile", json={"content_id": "missing"}
             )
@@ -494,8 +513,8 @@ def test_chat_and_token_blocks_share_native_tokens_embeddings_and_pic_positions(
             ]
         )
         assert (
-            exact["reusable_input"].spans
-            == chat["reusable_input"].spans
+            exact["extension"].data["spans"]
+            == chat["extension"].data["spans"]
             == [
                 (1, 5, 0),
                 (8, 5, 0),

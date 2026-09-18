@@ -31,3 +31,6 @@ class ContentInfo(TypedDict):
     content_id: str
     input_ids: list[int]
     logical_length: int
+    source_registered: bool
+    compilation: NotRequired[dict]
+    metrics: NotRequired[dict]

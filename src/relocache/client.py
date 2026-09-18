@@ -1,6 +1,7 @@
 """Lightweight asynchronous HTTP access; no engine imports."""
 
 import asyncio
+import json
 from time import perf_counter
 
 import httpx
@@ -52,6 +53,36 @@ class Client:
 
     async def complete(self, blocks: list[ContentBlock], **generation):
         return await self.post("/v1/completions", {**generation, "prompt": {"blocks": blocks}})
+
+    async def status(self, content_id):
+        response = await self.http.get(f"/v1/reusable_contents/{content_id}/status")
+        response.raise_for_status()
+        return response.json()
+
+    async def deployment(self):
+        response = await self.http.get("/v1/relocache")
+        response.raise_for_status()
+        return response.json()
+
+    async def complete_stream(self, blocks: list[ContentBlock], **generation):
+        """Yield native SSE payloads; close the iterator to cancel the request."""
+        payload = {**generation, "prompt": {"blocks": blocks}, "stream": True}
+        payload.setdefault("stream_options", {"include_usage": True})
+        async with self.http.stream("POST", "/v1/completions", json=payload) as response:
+            response.raise_for_status()
+            data = []
+            async for line in response.aiter_lines():
+                if line.startswith("data:"):
+                    data.append(line[5:].lstrip())
+                elif not line and data:
+                    message = "\n".join(data)
+                    data.clear()
+                    if message == "[DONE]":
+                        return
+                    event = json.loads(message)
+                    if "error" in event:
+                        raise RuntimeError(event["error"])
+                    yield event
 
 
 async def completed_requests(request, items, concurrency):
