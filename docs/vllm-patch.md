@@ -6,13 +6,15 @@
 git -C third_party/vllm diff upstream-base HEAD
 ```
 
-当前累计差异仅包含 28 个源码文件，增加 410 行、删除 46 行。相关回归测试和说明统一放在 ReLoCache 主仓库的 `tests/`、`docs/` 中；fork 的测试和文档与 `upstream-base` 保持一致。
+当前累计差异包含 28 个源码文件，增加 410 行、删除 46 行。相关回归测试和说明统一放在 ReLoCache 主仓库的 `tests/`、`docs/` 中；fork 的测试和文档与 `upstream-base` 保持一致。
+
+这是当前实现的清单，不代表最小必要修改。已有扩展点的覆盖范围、可收回的改动及实施取舍见[最小侵入接入评估](vllm-minimal-integration.md)。
 
 PIC 服务仍依赖该 fork。ReLoCache 使用原生 endpoint/general plugins、CustomOp 注册、Scheduler 子类和调度输出处理；没有复制原生调度器、KV 管理器或模型执行主循环。
 
 ## 当前保留的源码修改
 
-| 范围 | 相对原始版本的行为 | 保留原因 |
+| 范围 | 相对原始版本的行为 | 当前用途 |
 | --- | --- | --- |
 | 输入渲染 | Completion、Chat 与 Responses item 转换回调。 | 结构化内容必须在原生 tokenization、消息转换丢失信息之前接管；普通输入继续调用原生处理。 |
 | Request 与 IPC | 扩展元数据、typed tensors、内部请求标记、必需缓存量、加载统计及 worker 元数据。 | 跨进程传递布局与 Writer 输入，沿用原生 Tensor IPC；内部 Writer 不产生外部响应。 |
