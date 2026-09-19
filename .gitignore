@@ -9,5 +9,6 @@ build/
 dist/
 runs/
 artifacts/
+reports/
 *.log
 .env
