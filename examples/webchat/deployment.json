@@ -1,0 +1,20 @@
+{
+  "model": "../models/Qwen3-4B-Instruct-2507",
+  "method_id": "sempic-open-qwen3-4b-two-stage-reference-stage2-20260920",
+  "served_model_name": "reader",
+  "writer_adapter": "artifacts/webchat-qwen3-4b-two-stage/writer-adapter",
+  "auto_compile": true,
+  "engine": {
+    "dtype": "bfloat16",
+    "max_model_len": 32768,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 2048,
+    "block_size": 16,
+    "gpu_memory_utilization": 0.25,
+    "tensor_parallel_size": 1,
+    "data_parallel_size": 1,
+    "compilation_config": {
+      "cudagraph_capture_sizes": [1, 2, 4]
+    }
+  }
+}

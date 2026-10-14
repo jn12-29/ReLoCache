@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>ReLoCache · Chat Demo</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Cpath d='M18 44V20h14a8 8 0 010 16H18m13 0l13 8' fill='none' stroke='white' stroke-width='5'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/demo/assets/style.css">
+  <script type="module" src="/demo/assets/app.mjs"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/demo"><span class="brand-mark">R</span><span>ReLoCache<small>REUSABLE CONTEXT, LIVE.</small></span></a>
+    <div class="section-heading"><span>演示工作区</span><span class="tag">LIVE DEMO</span></div>
+    <label for="scenario">预置文本</label>
+    <select id="scenario"></select>
+    <div class="document-heading"><label for="document">可复用文档</label><span id="document-size"></span></div>
+    <textarea id="document" spellcheck="false" aria-describedby="document-help"></textarea>
+    <p class="help" id="document-help">PIC 独立编译此文档；Full Prefill 将原文放入上下文。</p>
+    <div class="button-row"><button id="compile" class="secondary">提前编译 PIC</button><button id="restore" class="text-button">恢复示例</button></div>
+    <p id="compile-status" class="help" role="status"></p>
+    <details class="settings">
+      <summary>生成设置</summary>
+      <label for="system">System prompt</label>
+      <textarea id="system" rows="3">请根据提供的资料，用中文简洁回答，通常不超过 200 字。计算题直接列出公式和结果。保留关键数字和术语；资料没有的信息请明确说明。</textarea>
+      <div class="setting-grid"><label>输出上限<input id="max-tokens" type="number" min="1" max="4096" value="768"></label><label>Temperature<input id="temperature" type="number" min="0" max="2" step="0.1" value="0"></label></div>
+      <p class="help">修改文档、场景或 System prompt 会开始新对话；引擎缓存保留。</p>
+    </details>
+    <div class="sidebar-footer"><span class="connection-dot" id="connection-dot"></span><span id="connection">正在连接推理服务</span><button id="reconnect" class="text-button" aria-label="重新连接">↻</button></div>
+  </aside>
+
+  <main>
+    <header>
+      <div><div class="eyebrow">PLAYGROUND / INFERENCE</div><h1>让上下文，再用一次。</h1><p class="subtitle">流式对话，观察 PIC 如何复用文档 KV。</p></div>
+      <button id="new-chat" class="secondary">＋ 新对话</button>
+    </header>
+    <div class="toolbar">
+      <div class="segmented" role="group" aria-label="推理模式">
+        <button data-mode="pic" class="selected" aria-pressed="true">PIC 复用</button>
+        <button data-mode="full" aria-pressed="false">Full Prefill</button>
+        <button data-mode="compare" aria-pressed="false">并排对比</button>
+      </div>
+      <div class="deployment-label"><span id="model-name" class="model-name">模型未连接</span><span id="writer-name" class="writer-name"></span></div>
+    </div>
+    <div id="session-note" class="session-note">首次 PIC 请求可能包含自动编译；后续请求是否复用，以实际统计为准。</div>
+    <div id="conversations" class="conversations">
+      <section class="chat-panel" id="panel-pic" aria-label="PIC 对话">
+        <div class="panel-heading"><span><i class="mode-dot"></i>PIC <small>可复用文档 KV</small></span><span id="state-pic" class="panel-state">就绪</span></div>
+        <div id="messages-pic" class="messages" role="log" aria-label="PIC 对话记录"></div>
+      </section>
+      <section class="chat-panel" id="panel-full" aria-label="Full Prefill 对话" hidden>
+        <div class="panel-heading"><span><i class="mode-dot full"></i>Full Prefill <small>普通文本输入</small></span><span id="state-full" class="panel-state">就绪</span></div>
+        <div id="messages-full" class="messages" role="log" aria-label="Full Prefill 对话记录"></div>
+      </section>
+    </div>
+    <section class="composer-area">
+      <div id="suggestions" class="suggestions" aria-label="示例问题"></div>
+      <form id="chat-form" class="composer">
+        <label class="sr-only" for="question">输入问题</label>
+        <textarea id="question" rows="2" placeholder="问问这份文档…… Enter 发送，Shift + Enter 换行" required></textarea>
+        <div class="composer-bottom"><span id="composer-hint">已准备好示例文档，点击上方问题即可演示。</span><button id="stop" class="secondary" type="button" hidden>停止生成</button><button id="send" type="submit" class="primary" disabled>发送 <span>↗</span></button></div>
+      </form>
+      <p class="timing-note">TTFT：发送请求 → 首个非空生成片段（含推理）。总耗时包含排队、编译 / 加载和网络；对比请求并发执行，共享引擎资源与原生前缀缓存，供交互演示。</p>
+    </section>
+  </main>
+  <div id="toast" role="status" class="toast" hidden></div>
+</body>
+</html>

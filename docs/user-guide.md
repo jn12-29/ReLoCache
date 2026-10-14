@@ -584,3 +584,43 @@ Completion、Chat、Responses 响应使用 `kv_transfer_params.relocache`。Comp
 | 指标显示再次编译 | 检查是否落到另一个 DP 副本、缓存被淘汰、来源或 Writer 身份变化，以及存储层是否配置 |
 
 缓存缺失是请求级错误，不应把一次失败解释为服务整体退出。HTTP 和 SSE 错误封装可能不同；保留原始错误消息与 `code`/`finish_reason` 以定位。服务没有对外上传/下载原始 KV tensor、删除内容或驱逐指定文档页的专用接口。
+
+## 11. Web Chat 演示
+
+ReLoCache API server 启动后，浏览器访问 `http://127.0.0.1:8000/demo`。页面默认填入虚构的长篇企业运营手册与第一个问题：24 节制度、12 个核算案例和 144 条项目台账，约 1.9 万字符、Qwen3 tokenizer 下 13,902 tokens。也可切换 ReLoCache 技术说明或自行编辑原文。长文建议使用至少 32K 上下文，为模板、问题、对话历史和输出保留空间。页面支持连续对话、停止生成、修改文档与生成设置，以及以下模式：
+
+- **PIC 复用**：文档以 `reusable_content` 传入，使用当前部署的 Writer。首次请求可自动编译；也可先点击「提前编译 PIC」。
+- **Full Prefill**：将相同文档作为普通文本提交，保留原生 prefix caching。
+- **并排对比**：同时发送两个独立对话请求，分别呈现回答与指标。它们共享引擎资源，可能相互影响排队和缓存，不能作为隔离性能基准。
+
+修改场景、文档、System prompt 或推理模式会开始新对话。「新对话」只清空页面历史，不清空引擎缓存。刷新页面恢复预置文本。提前编译不请求持久化，且只在返回的 DP rank 上完成；后续请求落到其他副本时仍可能自动编译。
+
+页面使用浏览器 `performance.now()` 计时：TTFT 从发起请求前到首个非空内容或推理片段，不计 role-only、空 delta 或 usage 事件；总耗时到 SSE `[DONE]`。输出 tokens 采用服务端最终 usage，tokens/s 为输出 tokens 除以总耗时，属于端到端速率。推理文本单独折叠展示。若流中断、服务返回错误或手动停止，会保留已显示内容并标记状态，不把本轮加入后续历史。KV 指标来自最终 usage chunk 的 `kv_transfer_params.relocache`，可展开查看原始统计。
+
+也可独立启动 Web Chat，通过同源流式代理连接已有服务，前端无需配置 CORS，也不需要单独安装 Node：
+
+```bash
+# A separate webchat installation needs only the webchat extra, without vLLM.
+uv sync --extra webchat
+uv run --no-sync relocache webchat \
+  --api-base http://127.0.0.1:8000 \
+  --host 0.0.0.0 --port 8080
+```
+
+项目已有完整推理环境时，直接运行第二条命令，无需重新 sync。浏览器访问 `http://<服务器地址>:8080/demo`。`--api-base` 为 API 根地址，不包含 `/v1`。若上游启用了 API key，通过环境变量 `RELOCACHE_API_KEY` 提供，代理在服务器端附加该凭据。未连接上游时仍能浏览预置文本，启动推理服务后点击左下角的重新连接按钮。
+
+只需展示当前基础能力时，可使用 Base Writer 和无 soft tokens 的部署配置。LoRA 与 Writer soft tokens 仍由推理服务部署配置决定，页面不会根据场景替换 Writer。
+
+展示跨上下文复用时，先点击「提前编译 PIC」，再用「并排对比」提问。修改生成设置中的 System prompt 会开始新对话并改变文档的前置上下文，已编译文档仍可复用；Full Prefill 的原生前缀命中则取决于实际前缀。不要通过反复提交相同问题把原生前缀缓存收益解释为 PIC 独有收益。
+
+当前本机演示选用 `../sempic_open/train_outputs/qwen_3_4b/native/sempic/20260920_035603_two_stage_reference_stage2/lora`：Qwen3-4B-Instruct-2507、rank 8 / alpha 16，先完成 3 个 epoch 的 SRD，再完成 2 个 epoch 的 native 训练。其训练与 ReLoCache 评测已完成，不需要额外 PacketWrapper 或 LinkToken。Adapter 只读复制到 `artifacts/webchat-qwen3-4b-two-stage/writer-adapter`，来源记录保存在相邻的 `source.json`；旧仓库不修改。启动配置见 `examples/webchat/deployment.json`，在根目录执行：
+
+```bash
+uv run --no-sync relocache serve \
+  --config examples/webchat/deployment.json \
+  --cuda-visible-devices 1 --host 127.0.0.1 --port 8010
+```
+
+此处 GPU 1 来自本次用户允许使用其他空闲 GPU 的授权；后续启动前应重新确认设备空闲并按当前设备授权调整。页面通过前述 `webchat` 命令连接 `http://127.0.0.1:8010`。LoRA 仅用于 Writer 编译；Reader 使用基础模型。对其他机器，先准备匹配的标准 PEFT adapter 并修改配置路径，不依赖当前目录中的研究 checkpoint 布局。
+
+前端为直接随包分发的 HTML/CSS/ES modules，无构建步骤或 CDN 请求。Markdown 展示使用随包附带的 marked 18.1.1 与 DOMPurify 3.4.17；版本及授权文本见 `src/relocache/webchat_assets/THIRD_PARTY_LICENSES.txt`。

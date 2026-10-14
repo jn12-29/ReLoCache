@@ -1,4 +1,4 @@
-"""Launch ReLoCache through the native vLLM serving lifecycle."""
+"""Launch native vLLM serving or a standalone Web Chat."""
 
 import argparse
 import json
@@ -9,6 +9,10 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    webchat = subparsers.add_parser("webchat", help="Serve Web Chat for an existing API server")
+    webchat.add_argument("--api-base", default="http://127.0.0.1:8000")
+    webchat.add_argument("--host", default="127.0.0.1")
+    webchat.add_argument("--port", type=int, default=8080)
     serve = subparsers.add_parser("serve")
     serve.add_argument("--config", required=True)
     serve.add_argument("--host", default="127.0.0.1")
@@ -17,6 +21,14 @@ def main():
     serve.add_argument("--data-parallel-size", type=int)
     serve.add_argument("--tensor-parallel-size", type=int)
     args = parser.parse_args()
+    if args.command == "webchat":
+        import uvicorn
+
+        from .webchat import create_app
+
+        app = create_app(args.api_base, api_key=os.environ.get("RELOCACHE_API_KEY"))
+        uvicorn.run(app, host=args.host, port=args.port)
+        return
     if args.cuda_visible_devices is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda_visible_devices
     plugins = list(filter(None, os.environ.get("VLLM_PLUGINS", "").split(",")))

@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = ["httpx>=0.28.1"]
 
 [project.optional-dependencies]
+webchat = ["fastapi>=0.136.3", "uvicorn>=0.53.0"]
 server = ["vllm", "torch==2.13.0"]
 demo = ["peft>=0.20.0", "safetensors>=0.8.0", "rouge-score>=0.1.2"]
 
@@ -26,6 +27,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["relocache*"]
+
+[tool.setuptools.package-data]
+relocache = ["webchat_assets/*"]
 
 [tool.uv]
 cache-dir = ".cache/uv"

@@ -7,6 +7,7 @@ from vllm.entrypoints.openai.completion.api_router import create_completion
 from vllm.entrypoints.openai.responses.api_router import create_responses
 
 from relocache.content import ContentError
+from relocache.webchat import mount_webchat
 
 from .content import ContentService
 from .protocol import (
@@ -99,6 +100,7 @@ class ReLoCacheEndpoints:
             )
         ]
         app.include_router(router)
+        mount_webchat(app)
         app.add_exception_handler(ContentError, content_error_handler)
 
     async def init_state(self, engine_client, state, args):
