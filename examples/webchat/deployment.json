@@ -5,6 +5,7 @@
   "writer_adapter": "artifacts/webchat-qwen3-4b-two-stage/writer-adapter",
   "auto_compile": true,
   "engine": {
+    "enable_prompt_tokens_details": true,
     "dtype": "bfloat16",
     "max_model_len": 32768,
     "max_num_seqs": 4,

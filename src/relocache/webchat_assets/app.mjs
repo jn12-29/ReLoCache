@@ -2,9 +2,10 @@ import { presets } from "./presets.mjs";
 import { readCompletion } from "./stream.mjs";
 import { marked } from "./marked.mjs";
 import DOMPurify from "./purify.mjs";
+import { contexts, readerMessages, cacheObservation } from "./conversation.mjs";
 
 const $ = id => document.getElementById(id);
-const state = { mode: "pic", busy: false, model: null, histories: { pic: [], full: [] }, controller: null };
+const state = { mode: "compare", comparisons: 0, busy: false, model: null, histories: { pic: [], full: [] }, controller: null };
 let contentId;
 let toastTimer;
 
@@ -56,7 +57,7 @@ function loadPreset() {
 
 function setBusy(busy) {
   state.busy = busy;
-  for (const id of ["scenario", "document", "restore", "system", "new-chat", "max-tokens", "temperature"]) $(id).disabled = busy;
+  for (const id of ["scenario", "document", "restore", "system", "new-chat", "max-tokens", "temperature", "context-preset", "context", "next-context"]) $(id).disabled = busy;
   document.querySelectorAll("[data-mode], #suggestions button").forEach(button => { button.disabled = busy; });
   $("send").disabled = busy || !state.model;
   $("compile").disabled = busy || !state.model || !$("document").value.trim();
@@ -103,22 +104,10 @@ async function connect() {
 }
 
 function buildMessages(kind, question) {
-  const messages = [];
-  if ($("system").value.trim()) messages.push({ role: "system", content: $("system").value.trim() });
-  for (const turn of [...state.histories[kind], { question }]) {
-    if (messages.every(message => message.role !== "user") && $("document").value.trim()) {
-      const document = $("document").value;
-      const prefix = "请阅读以下参考资料：\n\n";
-      const suffix = `\n\n参考资料结束。\n问题：${turn.question}`;
-      messages.push({ role: "user", content: kind === "pic" ? [
-        { type: "text", text: prefix },
-        { type: "reusable_content", id: contentId, text: document },
-        { type: "text", text: suffix },
-      ] : prefix + document + suffix });
-    } else messages.push({ role: "user", content: turn.question });
-    if (turn.answer !== undefined) messages.push({ role: "assistant", content: turn.answer });
-  }
-  return messages;
+  return readerMessages({
+    kind, question, system: $("system").value, context: $("context").value,
+    document: $("document").value, contentId, history: state.histories[kind],
+  });
 }
 
 function addTurn(kind, question) {
@@ -143,7 +132,8 @@ function addTurn(kind, question) {
   const detail = element("details", "metric-detail");
   detail.hidden = true;
   detail.append(element("summary"), element("pre"));
-  assistant.append(reasoning, body, metrics, detail);
+  const cache = element("div", "cache-observation", "等待服务端缓存统计");
+  assistant.append(reasoning, body, metrics, cache, detail);
   container.append(user, assistant);
 
   return {
@@ -159,11 +149,13 @@ function addTurn(kind, question) {
       values.tokens.textContent = result.usage?.completion_tokens ?? "—";
       values.rate.textContent = result.duration && result.usage?.completion_tokens
         ? (result.usage.completion_tokens / (result.duration / 1000)).toFixed(1) : "—";
-      if (result.pic) {
+      if (result.usage) cache.textContent = cacheObservation(result, kind);
+      if (result.usage || result.pic) {
         detail.hidden = false;
-        const pic = result.pic;
-        detail.querySelector("summary").textContent = `KV 复用 ${pic.reused_tokens ?? 0} tokens / ${pic.reused_pages ?? 0} 页 · 自动编译 ${pic.auto_compiles ?? 0} · Reader prefill ${pic.prefill_tokens_executed ?? "—"} tokens`;
-        detail.querySelector("pre").textContent = JSON.stringify(pic, null, 2);
+        detail.querySelector("summary").textContent = result.pic
+          ? `复用 ${result.pic.reused_pages ?? 0} 页 · 自动编译 ${result.pic.auto_compiles ?? 0} · 查看原始统计`
+          : "查看原生 usage / timing 统计";
+        detail.querySelector("pre").textContent = JSON.stringify({ usage: result.usage, relocache: result.pic, timing: result.timing }, null, 2);
       }
       if (nearBottom) container.scrollTop = container.scrollHeight;
     },
@@ -215,11 +207,25 @@ $("chat-form").addEventListener("submit", async event => {
   const question = $("question").value.trim();
   if (!question || state.busy || !state.model) return;
   if (!$("max-tokens").reportValidity() || !$("temperature").reportValidity()) return;
-  const kinds = state.mode === "compare" ? ["pic", "full"] : [state.mode];
+  const kinds = state.mode === "compare"
+    ? (state.comparisons++ % 2 === 0 ? ["full", "pic"] : ["pic", "full"])
+    : [state.mode];
   state.controller = new AbortController();
   setBusy(true);
   $("question").value = "";
-  try { await Promise.all(kinds.map(kind => generate(kind, question, state.controller.signal))); }
+  if (state.mode === "compare") {
+    $("session-note").textContent = `本轮顺序：${kinds.map(kind => kind === "pic" ? "PIC" : "Full Prefill").join(" → ")}。两者保留原生缓存，按实际命中量解读 TTFT。`;
+    for (const kind of kinds) $(`state-${kind}`).textContent = "等待执行";
+  }
+  try {
+    for (const kind of kinds) {
+      if (state.controller.signal.aborted) {
+        $(`state-${kind}`).textContent = "已取消";
+        continue;
+      }
+      await generate(kind, question, state.controller.signal);
+    }
+  }
   finally { state.controller = null; setBusy(false); $("question").focus(); }
 });
 
@@ -236,6 +242,18 @@ $("scenario").addEventListener("change", loadPreset);
 $("restore").addEventListener("click", loadPreset);
 $("document").addEventListener("input", () => { resetSession({ sourceChanged: true }); setBusy(false); });
 $("system").addEventListener("input", () => resetSession());
+function changeContext() {
+  $("context").value = contexts[Number($("context-preset").value)].text;
+  resetSession();
+  if (!$("question").value.trim()) $("question").value = presets[$("scenario").value].questions[0];
+  toast("已切换前置上下文并开始新对话；文档和引擎缓存保留。");
+}
+$("context-preset").addEventListener("change", changeContext);
+$("context").addEventListener("input", () => resetSession());
+$("next-context").addEventListener("click", () => {
+  $("context-preset").value = (Number($("context-preset").value) + 1) % contexts.length;
+  changeContext();
+});
 document.querySelectorAll("[data-mode]").forEach(button => button.addEventListener("click", () => {
   if (state.mode === button.dataset.mode) return;
   state.mode = button.dataset.mode;
@@ -271,4 +289,10 @@ presets.forEach((preset, index) => {
   $("scenario").append(option);
 });
 loadPreset();
+contexts.forEach((context, index) => {
+  const option = element("option", "", context.name);
+  option.value = index;
+  $("context-preset").append(option);
+});
+$("context").value = contexts[0].text;
 connect();

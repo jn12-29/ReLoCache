@@ -39,7 +39,7 @@ export async function readCompletion(response, onUpdate, { started, clock = () =
     try { const data = JSON.parse(text); message = data.error?.message ?? data.detail; } catch { /* Keep the HTTP body. */ }
     throw new Error(typeof message === "string" ? message : text || `HTTP ${response.status}`);
   }
-  const result = { text: "", reasoning: "", ttft: null, duration: null, usage: null, pic: null, finishReason: null };
+  const result = { text: "", reasoning: "", ttft: null, duration: null, usage: null, pic: null, timing: null, finishReason: null };
   for await (const data of sseEvents(response.body)) {
     if (data === "[DONE]") {
       result.duration = clock() - started;
@@ -49,6 +49,7 @@ export async function readCompletion(response, onUpdate, { started, clock = () =
     const event = JSON.parse(data);
     if (event.error) throw new Error(event.error.message ?? JSON.stringify(event.error));
     if (event.usage) result.usage = event.usage;
+    if (event.metrics) result.timing = event.metrics;
     if (event.kv_transfer_params?.relocache) result.pic = event.kv_transfer_params.relocache;
     const choice = event.choices?.[0];
     if (choice?.finish_reason === "error") throw new Error(String(choice.stop_reason ?? "推理请求失败"));

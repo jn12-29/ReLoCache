@@ -37,19 +37,25 @@
     </header>
     <div class="toolbar">
       <div class="segmented" role="group" aria-label="推理模式">
-        <button data-mode="pic" class="selected" aria-pressed="true">PIC 复用</button>
+        <button data-mode="pic" aria-pressed="false">PIC 复用</button>
         <button data-mode="full" aria-pressed="false">Full Prefill</button>
-        <button data-mode="compare" aria-pressed="false">并排对比</button>
+        <button data-mode="compare" class="selected" aria-pressed="true">并排对比</button>
       </div>
       <div class="deployment-label"><span id="model-name" class="model-name">模型未连接</span><span id="writer-name" class="writer-name"></span></div>
     </div>
-    <div id="session-note" class="session-note">首次 PIC 请求可能包含自动编译；后续请求是否复用，以实际统计为准。</div>
+    <section class="context-controls" aria-label="文档前置上下文">
+      <div class="context-heading"><label for="context-preset">文档前置上下文</label><select id="context-preset"></select><button id="next-context" class="secondary">切换上下文 · 保留缓存</button></div>
+      <label class="sr-only" for="context">前置上下文内容</label>
+      <textarea id="context" rows="2"></textarea>
+      <p class="help">固定上下文连续问答：两者都可能命中缓存。切换上下文：观察同一文档能否跨位置复用。切回旧上下文时，Full Prefill 也可能再次命中。</p>
+    </section>
+    <div id="session-note" class="session-note">两路请求顺序执行、交替先后。首次 PIC 请求可能包含自动编译，可先点击「提前编译 PIC」。</div>
     <div id="conversations" class="conversations">
       <section class="chat-panel" id="panel-pic" aria-label="PIC 对话">
         <div class="panel-heading"><span><i class="mode-dot"></i>PIC <small>可复用文档 KV</small></span><span id="state-pic" class="panel-state">就绪</span></div>
         <div id="messages-pic" class="messages" role="log" aria-label="PIC 对话记录"></div>
       </section>
-      <section class="chat-panel" id="panel-full" aria-label="Full Prefill 对话" hidden>
+      <section class="chat-panel" id="panel-full" aria-label="Full Prefill 对话">
         <div class="panel-heading"><span><i class="mode-dot full"></i>Full Prefill <small>普通文本输入</small></span><span id="state-full" class="panel-state">就绪</span></div>
         <div id="messages-full" class="messages" role="log" aria-label="Full Prefill 对话记录"></div>
       </section>
@@ -61,7 +67,7 @@
         <textarea id="question" rows="2" placeholder="问问这份文档…… Enter 发送，Shift + Enter 换行" required></textarea>
         <div class="composer-bottom"><span id="composer-hint">已准备好示例文档，点击上方问题即可演示。</span><button id="stop" class="secondary" type="button" hidden>停止生成</button><button id="send" type="submit" class="primary" disabled>发送 <span>↗</span></button></div>
       </form>
-      <p class="timing-note">TTFT：发送请求 → 首个非空生成片段（含推理）。总耗时包含排队、编译 / 加载和网络；对比请求并发执行，共享引擎资源与原生前缀缓存，供交互演示。</p>
+      <p class="timing-note">TTFT：各请求发送 → 首个非空生成片段（含推理）。保留原生前缀缓存，展示实际命中量；PIC 引擎命中还包含 PIC 页，不能全部视作动态前缀命中。时间包含排队、编译 / 加载和网络，供交互演示。</p>
     </section>
   </main>
   <div id="toast" role="status" class="toast" hidden></div>

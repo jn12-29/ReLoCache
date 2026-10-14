@@ -591,11 +591,13 @@ ReLoCache API server 启动后，浏览器访问 `http://127.0.0.1:8000/demo`。
 
 - **PIC 复用**：文档以 `reusable_content` 传入，使用当前部署的 Writer。首次请求可自动编译；也可先点击「提前编译 PIC」。
 - **Full Prefill**：将相同文档作为普通文本提交，保留原生 prefix caching。
-- **并排对比**：同时发送两个独立对话请求，分别呈现回答与指标。它们共享引擎资源，可能相互影响排队和缓存，不能作为隔离性能基准。
+- **并排对比**（默认）：两路请求顺序执行，每轮交换先后顺序，分别从各请求发送前开始计时。减少同一页面的两路请求互相排队，不清空或禁用原生缓存；其他请求仍可能影响实际耗时。
 
-修改场景、文档、System prompt 或推理模式会开始新对话。「新对话」只清空页面历史，不清空引擎缓存。刷新页面恢复预置文本。提前编译不请求持久化，且只在返回的 DP rank 上完成；后续请求落到其他副本时仍可能自动编译。
+页面提供行政助理、财务审核和新员工三个可编辑的文档前置上下文。它们以普通文本放在文档之前，两路请求使用相同的上下文和问题。切换前置上下文、修改场景、文档、System prompt 或推理模式会开始新对话。「新对话」和「切换上下文」保留引擎缓存；后者也保留文档来源。刷新页面恢复预置文本。提前编译不请求持久化，且只在返回的 DP rank 上完成；后续请求落到其他副本时仍可能自动编译。
 
-页面使用浏览器 `performance.now()` 计时：TTFT 从发起请求前到首个非空内容或推理片段，不计 role-only、空 delta 或 usage 事件；总耗时到 SSE `[DONE]`。输出 tokens 采用服务端最终 usage，tokens/s 为输出 tokens 除以总耗时，属于端到端速率。推理文本单独折叠展示。若流中断、服务返回错误或手动停止，会保留已显示内容并标记状态，不把本轮加入后续历史。KV 指标来自最终 usage chunk 的 `kv_transfer_params.relocache`，可展开查看原始统计。
+页面使用浏览器 `performance.now()` 计时：TTFT 从发起请求前到首个非空内容或推理片段，不计 role-only、空 delta 或 usage 事件；总耗时到 SSE `[DONE]`。输出 tokens 采用服务端最终 usage，tokens/s 为输出 tokens 除以总耗时，属于端到端速率。推理文本单独折叠展示。若流中断、服务返回错误或手动停止，会保留已显示内容并标记状态，不把本轮加入后续历史。
+
+Full Prefill 显示原生 `usage.prompt_tokens_details.cached_tokens`、总输入 tokens 和两者之差（非缓存输入量，不是独立的引擎调度计数）。部署配置的 `engine.enable_prompt_tokens_details=true` 开启原生统计；未报告时显示「未报告」，不假设为零。PIC 显示 `kv_transfer_params.relocache` 的文档复用量和 Reader 实际 prefill；其原生 cached_tokens 包含 PIC 页和 padding，不能全部归为动态前缀命中。两路均可展开查看原始 usage、PIC 和引擎 timing。
 
 也可独立启动 Web Chat，通过同源流式代理连接已有服务，前端无需配置 CORS，也不需要单独安装 Node：
 
@@ -611,7 +613,7 @@ uv run --no-sync relocache webchat \
 
 只需展示当前基础能力时，可使用 Base Writer 和无 soft tokens 的部署配置。LoRA 与 Writer soft tokens 仍由推理服务部署配置决定，页面不会根据场景替换 Writer。
 
-展示跨上下文复用时，先点击「提前编译 PIC」，再用「并排对比」提问。修改生成设置中的 System prompt 会开始新对话并改变文档的前置上下文，已编译文档仍可复用；Full Prefill 的原生前缀命中则取决于实际前缀。不要通过反复提交相同问题把原生前缀缓存收益解释为 PIC 独有收益。
+建议先点击「提前编译 PIC」，将文档准备与 Reader TTFT 分开，然后在固定上下文中连续提问，观察两者都可能命中缓存。再点击「切换上下文 · 保留缓存」，用相同文档提问，观察 Full Prefill 的实际前缀命中量与 PIC 的独立文档复用量。切回已经用过的上下文时，Full Prefill 仍可能命中；不通过随机 cache salt、逐请求 reset 或关闭原生缓存制造差异。不将固定前缀下的缓存收益归为 PIC 独有收益，也不要求 PIC 在每种缓存状态下均更快。
 
 当前本机演示选用 `../sempic_open/train_outputs/qwen_3_4b/native/sempic/20260920_035603_two_stage_reference_stage2/lora`：Qwen3-4B-Instruct-2507、rank 8 / alpha 16，先完成 3 个 epoch 的 SRD，再完成 2 个 epoch 的 native 训练。其训练与 ReLoCache 评测已完成，不需要额外 PacketWrapper 或 LinkToken。Adapter 只读复制到 `artifacts/webchat-qwen3-4b-two-stage/writer-adapter`，来源记录保存在相邻的 `source.json`；旧仓库不修改。启动配置见 `examples/webchat/deployment.json`，在根目录执行：
 

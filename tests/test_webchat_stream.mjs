@@ -27,7 +27,7 @@ test("TTFT ignores empty/role deltas and keeps final usage and PIC metrics", asy
     { choices: [{ delta: { role: "assistant", content: "" } }] },
     { choices: [{ delta: { content: "你好" } }] },
     { choices: [{ delta: { content: "。" }, finish_reason: "stop" }] },
-    { choices: [], usage: { completion_tokens: 3 }, kv_transfer_params: { relocache: { reused_tokens: 120 } } },
+    { choices: [], usage: { prompt_tokens: 160, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 128 } }, metrics: { queue_time: 0.01 }, kv_transfer_params: { relocache: { reused_tokens: 120 } } },
   ];
   const ticks = [145, 220];
   const result = await readCompletion(response(events.map(frame).join("") + "data: [DONE]\n\n", { bytewise: true }), () => {}, { started: 100, clock: () => ticks.shift() });
@@ -35,6 +35,8 @@ test("TTFT ignores empty/role deltas and keeps final usage and PIC metrics", asy
   assert.equal(result.duration, 120);
   assert.equal(result.text, "你好。");
   assert.equal(result.usage.completion_tokens, 3);
+  assert.equal(result.usage.prompt_tokens_details.cached_tokens, 128);
+  assert.equal(result.timing.queue_time, 0.01);
   assert.equal(result.pic.reused_tokens, 120);
   assert.equal(result.finishReason, "stop");
 });
