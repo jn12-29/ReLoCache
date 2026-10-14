@@ -5,7 +5,7 @@ import DOMPurify from "./purify.mjs";
 import { contexts, readerMessages, cacheObservation } from "./conversation.mjs";
 
 const $ = id => document.getElementById(id);
-const state = { mode: "compare", comparisons: 0, busy: false, model: null, histories: { pic: [], full: [] }, controller: null };
+const state = { mode: "compare", comparisons: 0, busy: false, resetting: false, model: null, histories: { pic: [], full: [] }, controller: null };
 let contentId;
 let toastTimer;
 
@@ -61,7 +61,8 @@ function setBusy(busy) {
   document.querySelectorAll("[data-mode], #suggestions button").forEach(button => { button.disabled = busy; });
   $("send").disabled = busy || !state.model;
   $("compile").disabled = busy || !state.model || !$("document").value.trim();
-  $("stop").hidden = !busy;
+  $("clear-cache").disabled = busy || !state.model;
+  $("stop").hidden = !busy || state.resetting;
   $("send").hidden = busy;
 }
 
@@ -237,6 +238,34 @@ $("question").addEventListener("keydown", event => {
 });
 $("stop").addEventListener("click", () => state.controller?.abort());
 $("new-chat").addEventListener("click", () => { resetSession(); toast("已开始新对话，引擎缓存保留。"); });
+$("clear-cache").addEventListener("click", async () => {
+  state.resetting = true;
+  setBusy(true);
+  $("clear-cache").textContent = "正在清空……";
+  $("cache-reset-status").textContent = "正在请求原生 KV 缓存重置……";
+  try {
+    const response = await fetch("/reset_prefix_cache", { method: "POST" });
+    if (response.status === 404) throw new Error("推理服务未开放重置接口，请以 VLLM_SERVER_DEV_MODE=1 启动。");
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error?.message ?? JSON.stringify(result.detail ?? result));
+    if (!result.success) {
+      $("cache-reset-status").textContent = "清空未成功：仍有 KV 块被请求或传输占用，请稍后重试。";
+      return;
+    }
+    resetSession();
+    $("compile-status").textContent = "";
+    $("cache-reset-status").textContent = `上次清空成功：${new Date().toLocaleTimeString()}。Full Prefill 与 PIC 的 GPU 缓存已重置；文档和显存池保留。`;
+    $("session-note").textContent = "已清空 KV 缓存并开始新对话。可提前编译 PIC，或让下一次请求自动编译。";
+    if (!$("question").value.trim()) $("question").value = presets[$("scenario").value].questions[0];
+    toast("KV 缓存已清空，文档保留。");
+  } catch (error) {
+    $("cache-reset-status").textContent = `清空失败：${error.message}`;
+  } finally {
+    state.resetting = false;
+    $("clear-cache").textContent = "清空 KV 缓存";
+    setBusy(false);
+  }
+});
 $("reconnect").addEventListener("click", connect);
 $("scenario").addEventListener("change", loadPreset);
 $("restore").addEventListener("click", loadPreset);

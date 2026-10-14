@@ -33,8 +33,9 @@
   <main>
     <header>
       <div><div class="eyebrow">PLAYGROUND / INFERENCE</div><h1>让上下文，再用一次。</h1><p class="subtitle">流式对话，观察 PIC 如何复用文档 KV。</p></div>
-      <button id="new-chat" class="secondary">＋ 新对话</button>
+      <div class="header-actions"><button id="clear-cache" class="secondary" disabled>清空 KV 缓存</button><button id="new-chat" class="secondary">＋ 新对话</button></div>
     </header>
+    <p id="cache-reset-status" class="help cache-reset-status" role="status">清空会同时使 Full Prefill 和 PIC 的 GPU 缓存失效，保留文档；不会释放显存池。</p>
     <div class="toolbar">
       <div class="segmented" role="group" aria-label="推理模式">
         <button data-mode="pic" aria-pressed="false">PIC 复用</button>

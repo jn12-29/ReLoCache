@@ -595,6 +595,8 @@ ReLoCache API server 启动后，浏览器访问 `http://127.0.0.1:8000/demo`。
 
 页面提供行政助理、财务审核和新员工三个可编辑的文档前置上下文。它们以普通文本放在文档之前，两路请求使用相同的上下文和问题。切换前置上下文、修改场景、文档、System prompt 或推理模式会开始新对话。「新对话」和「切换上下文」保留引擎缓存；后者也保留文档来源。刷新页面恢复预置文本。提前编译不请求持久化，且只在返回的 DP rank 上完成；后续请求落到其他副本时仍可能自动编译。
 
+右上角「清空 KV 缓存」调用原生 `POST /reset_prefix_cache`。推理服务需在启动时设置 `VLLM_SERVER_DEV_MODE=1`，独立 Web Chat 会转发此接口。按钮在本页面生成或编译期间禁用，不强制抢占请求。仅收到 `success=true` 后，清空页面历史及编译状态、保留文档；`false` 或 HTTP 错误显示原因并保留原记录。此操作同时使 Full Prefill 与 PIC 的 GPU 缓存失效，不释放预分配显存，也不删除文件 KV；当前按钮不重置外部存储层。存在其他请求或传输占用时，应等待其完成后重试。
+
 页面使用浏览器 `performance.now()` 计时：TTFT 从发起请求前到首个非空内容或推理片段，不计 role-only、空 delta 或 usage 事件；总耗时到 SSE `[DONE]`。输出 tokens 采用服务端最终 usage，tokens/s 为输出 tokens 除以总耗时，属于端到端速率。推理文本单独折叠展示。若流中断、服务返回错误或手动停止，会保留已显示内容并标记状态，不把本轮加入后续历史。
 
 Full Prefill 显示原生 `usage.prompt_tokens_details.cached_tokens`、总输入 tokens 和两者之差（非缓存输入量，不是独立的引擎调度计数）。部署配置的 `engine.enable_prompt_tokens_details=true` 开启原生统计；未报告时显示「未报告」，不假设为零。PIC 显示 `kv_transfer_params.relocache` 的文档复用量和 Reader 实际 prefill；其原生 cached_tokens 包含 PIC 页和 padding，不能全部归为动态前缀命中。两路均可展开查看原始 usage、PIC 和引擎 timing。
@@ -618,7 +620,7 @@ uv run --no-sync relocache webchat \
 当前本机演示选用 `../sempic_open/train_outputs/qwen_3_4b/native/sempic/20260920_035603_two_stage_reference_stage2/lora`：Qwen3-4B-Instruct-2507、rank 8 / alpha 16，先完成 3 个 epoch 的 SRD，再完成 2 个 epoch 的 native 训练。其训练与 ReLoCache 评测已完成，不需要额外 PacketWrapper 或 LinkToken。Adapter 只读复制到 `artifacts/webchat-qwen3-4b-two-stage/writer-adapter`，来源记录保存在相邻的 `source.json`；旧仓库不修改。启动配置见 `examples/webchat/deployment.json`，在根目录执行：
 
 ```bash
-uv run --no-sync relocache serve \
+VLLM_SERVER_DEV_MODE=1 uv run --no-sync relocache serve \
   --config examples/webchat/deployment.json \
   --cuda-visible-devices 1 --host 127.0.0.1 --port 8010
 ```

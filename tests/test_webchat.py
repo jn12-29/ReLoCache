@@ -27,6 +27,7 @@ def test_proxy_preserves_body_queries_auth_errors_and_closes_streams():
     async def check():
         closed = []
         requests = []
+        reset_results = iter([False, True])
 
         class Stream(httpx.AsyncByteStream):
             async def __aiter__(self):
@@ -38,6 +39,8 @@ def test_proxy_preserves_body_queries_auth_errors_and_closes_streams():
 
         def handle(request):
             requests.append(request)
+            if request.url.path == "/reset_prefix_cache":
+                return httpx.Response(200, json={"success": next(reset_results)})
             if request.method == "GET":
                 return httpx.Response(401, json={"error": {"message": "denied"}})
             return httpx.Response(
@@ -68,6 +71,14 @@ def test_proxy_preserves_body_queries_auth_errors_and_closes_streams():
                     error = await client.get("/v1/models")
                     assert error.status_code == 401
                     assert error.json()["error"]["message"] == "denied"
+                    failed_reset = await client.post("/reset_prefix_cache")
+                    assert failed_reset.status_code == 200
+                    assert failed_reset.json() == {"success": False}
+                    reset = await client.post("/reset_prefix_cache")
+                    assert reset.json() == {"success": True}
+                    assert requests[-1].url == "http://engine/reset_prefix_cache"
+                    assert requests[-1].headers["authorization"] == "Bearer demo-key"
+                    assert requests[-1].url.query == b""
 
     asyncio.run(check())
 

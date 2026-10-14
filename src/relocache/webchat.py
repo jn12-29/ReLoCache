@@ -36,12 +36,13 @@ def create_app(api_base, *, api_key=None):
     async def root():
         return RedirectResponse("/demo")
 
+    @app.post("/reset_prefix_cache", include_in_schema=False)
     @app.api_route("/v1/{path:path}", methods=["GET", "POST"], include_in_schema=False)
-    async def proxy(path: str, request: Request):
+    async def proxy(request: Request):
         client = request.app.state.upstream
         upstream_request = client.build_request(
             request.method,
-            f"v1/{path}",
+            request.url.path.lstrip("/"),
             params=request.query_params,
             content=await request.body(),
             headers={"Content-Type": request.headers.get("content-type", "application/json")},
