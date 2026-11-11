@@ -10,7 +10,11 @@
 - wheel 在独立 Python 3.12 环境安装，未安装 Torch/vLLM；客户端、CLI、Web Chat 可用，3 项 Web Chat 测试通过。
 - `uv lock --check --offline` 和文档安装命令的 `uv sync --locked ... --dry-run` 通过。公开索引改为 PyPI；仅更新已撤回版本的构建工具 setuptools-scm 及其 vcs-versioning 依赖，运行时版本不变。
 
-本轮调整公开文档、示例、包元数据和修改标注，没有修改推理计算逻辑；没有新建完整 GPU 服务环境，也没有重跑 GPU 数值或方法质量/性能实验。下文的 GPU 结果仍属于历史验证。
+独立 checkout 的首次 metadata 构建检查发现，原有 `no-build-isolation-package` 配置依赖环境中预先安装的 setuptools。已移除该覆盖，使用 vLLM 声明的隔离构建依赖；构建与运行时 Torch 均固定为 2.13.0。
+
+修复后，在独立 checkout 中从空环境执行 `uv sync --python 3.12 --locked --extra server --extra webchat`，215 个包安装成功。Torch 2.13.0+cu130、原生 `_C_stable_libtorch` 扩展、EngineCore、PIC scheduler/attention 和服务 CLI 导入检查通过。固定基线的 CUDA 13.0 x86_64 wheel 在检查时可公开下载（HTTP 200）。
+
+本轮调整公开文档、示例、包元数据和修改标注，没有修改推理计算逻辑；安装及导入检查隐藏了 CUDA 设备，未启动 GPU 推理服务，也没有重跑 GPU 数值或方法质量/性能实验。下文的 GPU 结果仍属于历史验证。
 
 ## 实现边界
 

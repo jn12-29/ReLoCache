@@ -31,6 +31,8 @@ The `server` extra uses the local fork through `tool.uv.sources`; an unrelated
 PyPI vLLM installation cannot replace it. Installation downloads precompiled
 extensions for the pinned upstream commit; keep the build settings in
 `pyproject.toml`. Model weights and trained adapters are not included.
+uv installs the fork's declared build dependencies in an isolated environment;
+build and runtime both use the pinned Torch version.
 
 For an HTTP client only, install the base package from the checkout in your own
 environment (`uv pip install .`). It requires neither vLLM nor Torch. The

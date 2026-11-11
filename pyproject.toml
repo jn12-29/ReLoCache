@@ -41,7 +41,6 @@ relocache = ["webchat_assets/*"]
 
 [tool.uv]
 cache-dir = ".cache/uv"
-no-build-isolation-package = ["vllm"]
 
 [[tool.uv.index]]
 name = "pypi"

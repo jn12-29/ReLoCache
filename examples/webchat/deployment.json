@@ -10,7 +10,7 @@
     "max_num_seqs": 4,
     "max_num_batched_tokens": 2048,
     "block_size": 16,
-    "gpu_memory_utilization": 0.25,
+    "gpu_memory_utilization": 0.8,
     "tensor_parallel_size": 1,
     "data_parallel_size": 1,
     "compilation_config": {
