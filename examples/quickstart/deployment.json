@@ -1,0 +1,14 @@
+{
+  "model": "Qwen/Qwen3-0.6B",
+  "method_id": "qwen3-0.6b-base-pic-v1",
+  "served_model_name": "reader",
+  "auto_compile": true,
+  "engine": {
+    "dtype": "bfloat16",
+    "max_model_len": 4096,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 512,
+    "block_size": 16,
+    "gpu_memory_utilization": 0.5
+  }
+}

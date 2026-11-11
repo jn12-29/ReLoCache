@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Usage guide
+    url: https://github.com/jn12-29/ReLoCache/blob/main/docs/user-guide.md
+    about: Deployment, API, soft tokens, and evaluation instructions

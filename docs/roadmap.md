@@ -9,7 +9,7 @@
 - 已有内容注册、显式/自动编译、Reader 引用、flush 和配置持久化 KV 层后的落盘能力。
 - 已有 Base/LoRA Writer、Writer Pre/Post soft tokens 和独立的 Reader embeddings，支持 KV Packet / Joint 编译与引用。
 - PIC 生成支持 Chat/Responses 结构化引用和 completions 的有序 token 内容块，两条路径共用 Reader 逻辑输入表示。
-- `sempic_open` 当前只接入 teacher generation 与 `full_recompute`。已有 GPU 执行验证见 [README](../README.md)，不代表方法接入或正式质量、性能评测已经完成。
+- 外部 SemPIC 的历史生成接入覆盖 teacher generation 与 `full_recompute`。已有 GPU 执行验证见 [README](../README.md)，不代表方法接入或正式质量、性能评测已经完成。
 
 ## 职责与实施约束
 
@@ -19,7 +19,7 @@
 | ReLoCache | PIC 核心组件与高效服务，包括缓存编译、内容复用、相关推理实现及后端接入。 |
 | 推理后端 | 提供原生执行基础，通过插件或扩展点调用 ReLoCache 的组件，尽量减少源码修改，复用原生能力并保持性能。 |
 
-后续工作在已有能力上逐层扩展，优先复用原生接口和统计。协议实现后同步更新接入说明，删除被替代的旧路径。SemPIC 侧任务在本文中作为集成依赖跟踪；遵守当前仓库约定，旧 `sempic_open` 及其环境保持只读。
+后续工作在已有能力上逐层扩展，优先复用原生接口和统计。协议实现后同步更新接入说明，删除被替代的旧路径。SemPIC 侧任务在本文中作为外部集成依赖跟踪，不要求使用者取得研究仓库才能运行服务。
 
 ## 当前主线：PIC 核心与 vLLM 解耦
 

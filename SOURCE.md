@@ -1,13 +1,35 @@
-# Initialization Source
+# Source and attribution
 
-- Source repository: `/mnt/sata2/xh/EfficientAgent/sempic_iclr`.
-- Source commit: `642fb31bf12c54c74c7b8970067bd4f0da6e3ac1`.
-- Extracted subtree: `third_party/vllm`.
-- Last source commit changing that subtree: `26799674f52032d36df61418c28ea1df5d0695df`.
-- Upstream vLLM base: `08b3e67b669d18d5bbd14e456b8bb4794916e402`.
+ReLoCache separates PIC serving components from an earlier SemPIC research
+implementation. Training, datasets, and unpublished research artifacts are not
+required to install or run the service.
 
-The fork starts at the real upstream commit, imported from the local upstream reference repository with a shallow history boundary and tagged `upstream-base`. The next commit consolidates the current ReLoCache execution changes, including the Native PIC extraction and subsequent service separation. Use `git -C third_party/vllm diff upstream-base..main` to review the fork against upstream. Existing upstream license and attribution files are retained.
+## vLLM
 
-The original repositories and environments are read-only. No environment, compiled extension, runtime cache, model weights, or experiment output was copied. No runtime validation was performed during initialization.
+- Upstream: https://github.com/vllm-project/vllm
+- Base commit: `08b3e67b669d18d5bbd14e456b8bb4794916e402`
+- Fork: https://github.com/jn12-29/ReLoCache-vLLM
+- License: Apache-2.0; upstream notices and file attributions are retained.
 
-Future installation must create a new project environment and write build caches, service caches, logs, and exported deployment artifacts under new paths. Existing models and completed research artifacts may be consumed read-only. Keep the current upstream version while extracting the service.
+The fork starts at the real upstream commit, tagged `upstream-base`, with a
+shallow local history boundary. Later commits contain the execution extensions
+used by ReLoCache. The parent repository pins the fork as `third_party/vllm`.
+Review the cumulative changes with:
+
+```bash
+git -C third_party/vllm diff upstream-base..HEAD
+```
+
+PIC semantics, kernels, adapters, and integration tests live in ReLoCache. The
+fork retains native execution and narrow extension points; see
+[the patch boundary](docs/vllm-patch.md).
+
+## Browser dependencies
+
+The package bundles Marked 18.1.1 (MIT) and DOMPurify 3.4.17
+(Apache-2.0 or MPL-2.0). Their source headers and license texts are retained in
+`src/relocache/webchat_assets/THIRD_PARTY_LICENSES.txt` and the bundled modules.
+The demo handbook is fictional example content.
+
+Model weights, trained adapters, and datasets are not distributed with this
+repository. Obtain them separately under their respective licenses.

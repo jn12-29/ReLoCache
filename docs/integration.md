@@ -2,7 +2,7 @@
 
 For deployment, inference, and evaluation instructions, see the self-contained Chinese [user guide](user-guide.md). This document records architecture boundaries and implementation contracts.
 
-This document records the integration boundary after reviewing the initial extraction. The Qwen3-8B P16 demo completed six Full Prefill/PIC sample pairs on GPUs 4–7 with DP=4 and TP=1; results are in `runs/sempic-demo-20260914`. This covers on-demand LoRA Writer compilation and Reader soft tokens. The default abort shutdown logged an `EngineDeadError` after all responses and flush completed; all test GPU allocations were released.
+This document records the integration boundary after reviewing the initial extraction. The Qwen3-8B P16 demo completed six Full Prefill/PIC sample pairs on GPUs 4–7 with DP=4 and TP=1; the local-only results were recorded in `runs/sempic-demo-20260914` and are not distributed; public validation summaries are in [validation notes](decoupling-validation.md). This covers on-demand LoRA Writer compilation and Reader soft tokens. The default abort shutdown logged an `EngineDeadError` after all responses and flush completed; all test GPU allocations were released.
 
 ## Content terminology
 

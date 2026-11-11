@@ -48,37 +48,39 @@ def test_proxy_preserves_body_queries_auth_errors_and_closes_streams():
             )
 
         app = create_app("http://engine", api_key="demo-key")
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 base_url="http://engine/",
                 headers={"Authorization": "Bearer demo-key"},
                 transport=httpx.MockTransport(handle),
-            ) as upstream:
-                app.state.upstream = upstream
-                async with httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=app), base_url="http://demo"
-                ) as client:
-                    payload = {"messages": [{"role": "user", "content": "hello"}], "stream": True}
-                    response = await client.post("/v1/chat/completions?example=1", json=payload)
-                    assert response.status_code == 200
-                    assert response.headers["content-type"] == "text/event-stream"
-                    assert response.headers["x-accel-buffering"] == "no"
-                    assert response.text.endswith("data: [DONE]\n\n")
-                    assert closed
-                    assert requests[0].url == "http://engine/v1/chat/completions?example=1"
-                    assert json.loads(requests[0].content) == payload
-                    assert requests[0].headers["authorization"] == "Bearer demo-key"
-                    error = await client.get("/v1/models")
-                    assert error.status_code == 401
-                    assert error.json()["error"]["message"] == "denied"
-                    failed_reset = await client.post("/reset_prefix_cache")
-                    assert failed_reset.status_code == 200
-                    assert failed_reset.json() == {"success": False}
-                    reset = await client.post("/reset_prefix_cache")
-                    assert reset.json() == {"success": True}
-                    assert requests[-1].url == "http://engine/reset_prefix_cache"
-                    assert requests[-1].headers["authorization"] == "Bearer demo-key"
-                    assert requests[-1].url.query == b""
+            ) as upstream,
+        ):
+            app.state.upstream = upstream
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://demo"
+            ) as client:
+                payload = {"messages": [{"role": "user", "content": "hello"}], "stream": True}
+                response = await client.post("/v1/chat/completions?example=1", json=payload)
+                assert response.status_code == 200
+                assert response.headers["content-type"] == "text/event-stream"
+                assert response.headers["x-accel-buffering"] == "no"
+                assert response.text.endswith("data: [DONE]\n\n")
+                assert closed
+                assert requests[0].url == "http://engine/v1/chat/completions?example=1"
+                assert json.loads(requests[0].content) == payload
+                assert requests[0].headers["authorization"] == "Bearer demo-key"
+                error = await client.get("/v1/models")
+                assert error.status_code == 401
+                assert error.json()["error"]["message"] == "denied"
+                failed_reset = await client.post("/reset_prefix_cache")
+                assert failed_reset.status_code == 200
+                assert failed_reset.json() == {"success": False}
+                reset = await client.post("/reset_prefix_cache")
+                assert reset.json() == {"success": True}
+                assert requests[-1].url == "http://engine/reset_prefix_cache"
+                assert requests[-1].headers["authorization"] == "Bearer demo-key"
+                assert requests[-1].url.query == b""
 
     asyncio.run(check())
 
@@ -89,16 +91,18 @@ def test_disconnected_engine_returns_a_browser_visible_error():
             raise httpx.ConnectError("connection refused", request=request)
 
         app = create_app("http://engine")
-        async with app.router.lifespan_context(app):
-            async with httpx.AsyncClient(
+        async with (
+            app.router.lifespan_context(app),
+            httpx.AsyncClient(
                 transport=httpx.MockTransport(handle), base_url="http://engine/"
-            ) as upstream:
-                app.state.upstream = upstream
-                async with httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=app), base_url="http://demo"
-                ) as client:
-                    response = await client.get("/v1/models")
-                    assert response.status_code == 502
-                    assert "connection refused" in response.json()["error"]["message"]
+            ) as upstream,
+        ):
+            app.state.upstream = upstream
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://demo"
+            ) as client:
+                response = await client.get("/v1/models")
+                assert response.status_code == 502
+                assert "connection refused" in response.json()["error"]["message"]
 
     asyncio.run(check())

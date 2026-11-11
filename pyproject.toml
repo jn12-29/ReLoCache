@@ -3,16 +3,24 @@ name = "relocache"
 version = "0.1.0"
 description = "Reusable-content serving with native vLLM PIC execution"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "src/relocache/webchat_assets/THIRD_PARTY_LICENSES.txt"]
 requires-python = ">=3.12"
 dependencies = ["httpx>=0.28.1"]
 
 [project.optional-dependencies]
 webchat = ["fastapi>=0.136.3", "uvicorn>=0.53.0"]
-server = ["vllm", "torch==2.13.0"]
+server = ["vllm==0.28.1rc1.dev590+g08b3e67b6.relocache", "torch==2.13.0"]
 demo = ["peft>=0.20.0", "safetensors>=0.8.0", "rouge-score>=0.1.2"]
 
 [project.scripts]
 relocache = "relocache.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jn12-29/ReLoCache"
+Repository = "https://github.com/jn12-29/ReLoCache"
+Issues = "https://github.com/jn12-29/ReLoCache/issues"
+Documentation = "https://github.com/jn12-29/ReLoCache/blob/main/docs/user-guide.md"
 
 [project.entry-points."vllm.endpoint_plugins"]
 relocache = "relocache.backends.vllm.api:ReLoCacheEndpoints"
@@ -34,6 +42,11 @@ relocache = ["webchat_assets/*"]
 [tool.uv]
 cache-dir = ".cache/uv"
 no-build-isolation-package = ["vllm"]
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
 
 [tool.uv.sources]
 vllm = { path = "third_party/vllm", editable = true }

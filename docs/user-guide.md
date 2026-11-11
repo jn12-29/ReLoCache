@@ -2,7 +2,7 @@
 
 本文面向使用 ReLoCache 执行 PIC 推理、接入训练产物或开展评测的使用者。环境准备、配置、请求、评测数据格式和结果解释均在本文中给出，无需阅读源码或其他项目文档。以下命令从 **ReLoCache 仓库根目录**执行。
 
-当前实现使用仓库固定版本的 vLLM fork。已完成 Qwen3-0.6B、Qwen3-8B 的相关执行验证；这不表示任意模型、attention 配置和并行组合均已验证。本文最小示例使用本机已有的 `../models/qwen3-0.6b`，服务模型名为 `reader`。
+当前实现使用仓库固定版本的 vLLM fork。已完成 Qwen3-0.6B、Qwen3-8B 的相关执行验证；这不表示任意模型、attention 配置和并行组合均已验证。本文最小示例使用公开模型 `Qwen/Qwen3-0.6B`，服务模型名为 `reader`；也可将模型字段替换为本地目录。
 
 ## 1. 先理解输入与方法
 
@@ -29,12 +29,12 @@ Writer soft tokens 进入文档编译并影响缓存身份；Reader soft tokens 
 
 ## 2. 环境准备
 
-需要 Linux、可用的 NVIDIA GPU/驱动、`uv`、Git，以及模型文件。本机约定只使用空闲的 GPU 4–7，不中断其他任务；模型从 `../models` 读取。新环境、缓存、产物均保存在本仓库，不修改旧研究仓库或环境。
+需要 Linux、与固定 vLLM 构建兼容的 NVIDIA GPU/驱动、`uv`、Git，以及模型文件。示例使用 GPU 0；执行前选择分配给自己的空闲设备，并按硬件容量调整显存预算。Python 3.12 是已验证的开发环境。
 
-首次获取仓库时，需要有两个私有仓库的读取权限：
+递归克隆主仓库及其固定版本的 vLLM fork：
 
 ```bash
-git clone --recurse-submodules git@github.com:jn12-29/ReLoCache.git
+git clone --recurse-submodules https://github.com/jn12-29/ReLoCache.git
 cd ReLoCache
 ```
 
@@ -42,7 +42,7 @@ cd ReLoCache
 
 ```bash
 git submodule update --init --recursive
-uv sync --locked --extra server --extra demo
+uv sync --python 3.12 --locked --extra server --extra webchat --extra demo
 uv run --no-sync relocache serve --help
 ```
 
@@ -58,8 +58,8 @@ uv run --no-sync relocache serve --help
 mkdir -p artifacts/quickstart
 cat > artifacts/quickstart/deployment.json <<'JSON'
 {
-  "model": "../models/qwen3-0.6b",
-  "tokenizer": "../models/qwen3-0.6b",
+  "model": "Qwen/Qwen3-0.6B",
+  "tokenizer": "Qwen/Qwen3-0.6B",
   "served_model_name": "reader",
   "method_id": "qwen3-0.6b-base-pic-v1",
   "auto_compile": true,
@@ -82,13 +82,13 @@ JSON
 
 ### 3.2 启动服务
 
-先查看设备状态，确认 GPU 4 空闲；否则将下面的 `4` 换成另一张空闲的 4–7 号卡：
+先查看设备状态，将下面的 `0` 换成分配给自己的空闲 GPU：
 
 ```bash
 nvidia-smi
 uv run --no-sync relocache serve \
   --config artifacts/quickstart/deployment.json \
-  --cuda-visible-devices 4 \
+  --cuda-visible-devices 0 \
   --data-parallel-size 1 \
   --tensor-parallel-size 1 \
   --host 127.0.0.1 \
@@ -190,7 +190,7 @@ from transformers import AutoTokenizer
 from relocache.client import Client
 
 async def main():
-    tokenizer = AutoTokenizer.from_pretrained("../models/qwen3-0.6b")
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
     def encode(text):
         return tokenizer.encode(text, add_special_tokens=False)
 
@@ -250,7 +250,7 @@ from transformers import AutoTokenizer
 from relocache.client import Client
 
 async def main():
-    tokenizer = AutoTokenizer.from_pretrained("../models/qwen3-0.6b")
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
     question = tokenizer.encode("\nReturn the access code:\n", add_special_tokens=False)
     async with Client("http://127.0.0.1:8000") as client:
         blocks = [
@@ -357,12 +357,12 @@ curl --fail-with-body http://127.0.0.1:8000/v1/reusable_contents/compile \
 
 ### 7.2 DP / TP
 
-单张卡可容纳模型时，可以通过 DP 提高并发；单张卡容不下时使用 TP。设备数按 DP × TP 配置，例如确认 4–7 均空闲后：
+单张卡可容纳模型时，可以通过 DP 提高并发；单张卡容不下时使用 TP。设备数按 DP × TP 配置，例如使用分配给自己的四张空闲卡：
 
 ```bash
 uv run --no-sync relocache serve \
   --config artifacts/quickstart/deployment.json \
-  --cuda-visible-devices 4,5,6,7 \
+  --cuda-visible-devices 0,1,2,3 \
   --data-parallel-size 4 \
   --tensor-parallel-size 1 \
   --port 8000
@@ -468,7 +468,7 @@ uv run --no-sync python examples/sempic/evaluate.py \
 uv run --no-sync python examples/sempic/evaluate.py \
   --bundle artifacts/quickstart-eval \
   --output runs/quickstart-eval-02 \
-  --cuda-visible-devices 4 \
+  --cuda-visible-devices 0 \
   --data-parallel-size 1 \
   --tensor-parallel-size 1 \
   --concurrency 1 \
@@ -494,16 +494,16 @@ bundle 生成目录和每次 `--output` 必须是新目录。自动启动时服�
 
 ```bash
 uv run --no-sync python examples/sempic/prepare.py \
-  --source-repo ../sempic_iclr \
-  --artifact runs/all-layer-supervision/training/qwen3-8b/P16/artifacts/step-00000216 \
-  --data data/six-datasets-128/models/qwen3-8b/validation.jsonl \
+  --source-repo /path/to/sempic-research \
+  --artifact artifacts/exported-step \
+  --data data/validation.jsonl \
   --output artifacts/sempic-eval-new \
   --samples-per-dataset 1
 ```
 
-这里给出的是本机既有产物路径；使用自己的训练结果时替换 `--source-repo`、`--artifact` 和 `--data`。产物包含 `method.json`、`method.safetensors`，数据为上面的 canonical JSONL。脚本只接受 `reduction.mode="identity"`，导出标准 PEFT Writer、**Reader** soft tokens、部署文件、样本及来源说明。它不负责把任意 KV Packet/Joint checkpoint 转成 Writer soft tokens。
+这个转换器面向已有 SemPIC ICLR 格式的研究产物；该研究仓库及 checkpoint 不随 ReLoCache 发布，也不是运行服务或 8.1 节自建评测 bundle 的前提。将 `--source-repo`、`--artifact` 和 `--data` 替换为自己的路径。产物包含 `method.json`、`method.safetensors`，数据为上面的 canonical JSONL。脚本只接受 `reduction.mode="identity"`，导出标准 PEFT Writer、**Reader** soft tokens、部署文件、样本及来源说明。它不负责把任意 KV Packet/Joint checkpoint 转成 Writer soft tokens。
 
-随后用 8.2 节的评测命令替换 `--bundle`，按 Qwen3-8B 的容量选择设备和并行配置。导出配置默认 `max_model_len=16640`、显存比例 0.8，应与可用设备容量相符。已有 `artifacts/qwen3-8b-P16` 时也可直接作为 bundle 使用，但 `artifacts/` 不随 Git 分发，不能假设新克隆已有该目录。
+随后用 8.2 节的评测命令替换 `--bundle`，按 Qwen3-8B 的容量选择设备和并行配置。导出配置默认 `max_model_len=16640`、显存比例 0.8，应与可用设备容量相符。`artifacts/` 不随 Git 分发；使用自己生成的 bundle。
 
 ### 8.4 方法比较的输入约定
 
@@ -617,14 +617,14 @@ uv run --no-sync relocache webchat \
 
 建议先点击「提前编译 PIC」，将文档准备与 Reader TTFT 分开，然后在固定上下文中连续提问，观察两者都可能命中缓存。再点击「切换上下文 · 保留缓存」，用相同文档提问，观察 Full Prefill 的实际前缀命中量与 PIC 的独立文档复用量。切回已经用过的上下文时，Full Prefill 仍可能命中；不通过随机 cache salt、逐请求 reset 或关闭原生缓存制造差异。不将固定前缀下的缓存收益归为 PIC 独有收益，也不要求 PIC 在每种缓存状态下均更快。
 
-当前本机演示选用 `../sempic_open/train_outputs/qwen_3_4b/native/sempic/20260920_035603_two_stage_reference_stage2/lora`：Qwen3-4B-Instruct-2507、rank 8 / alpha 16，先完成 3 个 epoch 的 SRD，再完成 2 个 epoch 的 native 训练。其训练与 ReLoCache 评测已完成，不需要额外 PacketWrapper 或 LinkToken。Adapter 只读复制到 `artifacts/webchat-qwen3-4b-two-stage/writer-adapter`，来源记录保存在相邻的 `source.json`；旧仓库不修改。启动配置见 `examples/webchat/deployment.json`，在根目录执行：
+仓库提供的 `examples/webchat/deployment.json` 使用公开的 `Qwen/Qwen3-4B-Instruct-2507`、Base Writer 和 32K 上下文，不需要训练产物。在根目录执行：
 
 ```bash
 VLLM_SERVER_DEV_MODE=1 uv run --no-sync relocache serve \
   --config examples/webchat/deployment.json \
-  --cuda-visible-devices 1 --host 127.0.0.1 --port 8010
+  --cuda-visible-devices 0 --host 127.0.0.1 --port 8010
 ```
 
-此处 GPU 1 来自本次用户允许使用其他空闲 GPU 的授权；后续启动前应重新确认设备空闲并按当前设备授权调整。页面通过前述 `webchat` 命令连接 `http://127.0.0.1:8010`。LoRA 仅用于 Writer 编译；Reader 使用基础模型。对其他机器，先准备匹配的标准 PEFT adapter 并修改配置路径，不依赖当前目录中的研究 checkpoint 布局。
+选择分配给自己的空闲 GPU。页面通过前述 `webchat` 命令连接 `http://127.0.0.1:8010`。离线使用时将 `model` 改为本地目录。要使用训练好的 Writer，在配置中加入匹配基础模型的标准 PEFT `writer_adapter` 路径，并为新的 Writer 设置独立 `method_id`；LoRA 仅用于 Writer 编译，Reader 使用基础模型。
 
 前端为直接随包分发的 HTML/CSS/ES modules，无构建步骤或 CDN 请求。Markdown 展示使用随包附带的 marked 18.1.1 与 DOMPurify 3.4.17；版本及授权文本见 `src/relocache/webchat_assets/THIRD_PARTY_LICENSES.txt`。

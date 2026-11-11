@@ -6,7 +6,7 @@
 git -C third_party/vllm diff upstream-base HEAD
 ```
 
-当前累计差异包含 22 个源码文件，增加 314 行、删除 44 行。相关回归测试和说明统一放在 ReLoCache 主仓库的 `tests/`、`docs/` 中；fork 的测试和文档与 `upstream-base` 保持一致。
+当前累计差异包含 22 个源码文件，增加 336 行、删除 44 行，其中 22 行是开源准备加入的逐文件修改标注。相关回归测试和详细接入说明位于 ReLoCache 主仓库的 `tests/`、`docs/`；fork 另有 README 入口、`RELOCACHE.md` 和贡献/问题模板。上游测试保持不变。
 
 这是当前实现的清单，不代表最小必要修改。已有扩展点的覆盖范围、可收回的改动及实施取舍见[最小侵入接入评估](vllm-minimal-integration.md)。
 

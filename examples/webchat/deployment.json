@@ -1,8 +1,7 @@
 {
-  "model": "../models/Qwen3-4B-Instruct-2507",
-  "method_id": "sempic-open-qwen3-4b-two-stage-reference-stage2-20260920",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "method_id": "qwen3-4b-base-pic-v1",
   "served_model_name": "reader",
-  "writer_adapter": "artifacts/webchat-qwen3-4b-two-stage/writer-adapter",
   "auto_compile": true,
   "engine": {
     "enable_prompt_tokens_details": true,

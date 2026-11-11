@@ -12,3 +12,5 @@ artifacts/
 reports/
 *.log
 .env
+.env.*
+!.env.example

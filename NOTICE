@@ -1,0 +1,12 @@
+ReLoCache
+Copyright 2026 ReLoCache contributors
+
+This project includes code derived from vLLM, licensed under Apache-2.0.
+Copyright contributors to the vLLM project.
+Upstream: https://github.com/vllm-project/vllm
+Base commit: 08b3e67b669d18d5bbd14e456b8bb4794916e402
+ReLoCache modifications implement PIC serving and backend integration.
+
+The browser UI bundles Marked (MIT) and DOMPurify (Apache-2.0 or MPL-2.0).
+Their notices and applicable license texts are included in
+src/relocache/webchat_assets/THIRD_PARTY_LICENSES.txt.

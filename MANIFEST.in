@@ -1,0 +1,4 @@
+include LICENSE NOTICE SOURCE.md CONTRIBUTING.md
+recursive-include docs *.md
+recursive-include examples *.py *.json *.md
+recursive-include tests *.py *.mjs
