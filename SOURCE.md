@@ -1,7 +1,9 @@
 # Source and attribution
 
 ReLoCache separates PIC serving components from an earlier SemPIC research
-implementation. Training, datasets, and unpublished research artifacts are not
+implementation. The training algorithm and research evaluation code are maintained
+in [SemPIC](https://github.com/jn12-29/SemPIC).
+Training, datasets, and unpublished research artifacts are not
 required to install or run the service.
 
 ## vLLM
