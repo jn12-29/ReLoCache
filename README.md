@@ -1,5 +1,9 @@
 # ReLoCache
 
+| Training algorithms | Inference backend |
+| --- | --- |
+| **[SemPIC](https://github.com/jn12-29/SemPIC)** | **[ReLoCache-vLLM](https://github.com/jn12-29/ReLoCache-vLLM)** |
+
 Reusable KV caching for LLM serving: compile content once with a Writer, then
 reuse its KV at different positions in Reader requests.
 
@@ -123,11 +127,9 @@ not a formal quality or throughput benchmark. Object-store end-to-end serving,
 other attention backends, compression, and selective recomputation are not
 covered by those checks. The Reader input currently ends with Dynamic Content.
 
-For the training algorithm and research evaluation code, see
-[SemPIC: Learning Semantic Position-Independent KV Caches](https://github.com/jn12-29/SemPIC).
 SemPIC training, datasets, prompt conventions, and scoring remain outside the
-ReLoCache service. `examples/sempic` provides an evaluation client and an optional converter
-for the documented research artifact format; neither is needed for quickstart.
+ReLoCache service. `examples/sempic` provides an evaluation client and an optional
+converter for the documented research artifact format; neither is needed for quickstart.
 
 ## Development and documentation
 
